@@ -13,6 +13,15 @@ type DeleteStep = 'analyze' | 'summary' | 'progress' | 'done';
 export const showDeleteWizard = signal(false);
 export const deleteTarget = signal<DeleteTarget | null>(null);
 
+/**
+ * Open the delete-version wizard for the specified version when deletion is permitted.
+ *
+ * Does nothing if `version.id` is missing. If any active session is using the version,
+ * displays an error and does not open the wizard. Otherwise sets the delete target and
+ * shows the delete modal.
+ *
+ * @param version - The version identifier object; `version.id` must be present to open the wizard
+ */
 export function openDeleteWizard(version: DeleteTarget): void {
   if (!version.id) return;
   const runningWithVersion = Object.values(runningSessions.value).some((session) => session.versionId === version.id);
@@ -24,14 +33,29 @@ export function openDeleteWizard(version: DeleteTarget): void {
   showDeleteWizard.value = true;
 }
 
+/**
+ * Closes the delete-wizard modal, clears the selected delete target, and plays the soft UI sound.
+ */
 export function closeDeleteWizard(): void {
   showDeleteWizard.value = false;
   deleteTarget.value = null;
   Sound.ui('soft');
 }
 
+/**
+ * Ensures runtime initialization and event bindings for the delete wizard are registered.
+ *
+ * Call once during application startup to guarantee the delete wizard is initialized.
+ */
 export function bindDeleteWizard(): void {}
 
+/**
+ * Render the delete wizard modal for confirming and executing deletion of a version.
+ *
+ * The component is displayed only when the module-level showDeleteWizard signal is true and a delete target with an id exists. It guides the user through analyzing version data, reviewing dependents/worlds/shared data, requiring the exact version id to confirm, and executing the delete (optionally cascading to dependent versions). The component performs API requests to fetch version info and to delete the version; on successful deletion it updates the shared versions store and (if present) the catalog's installed flags. Errors are reported via showError and the modal may be closed automatically on failure or by user actions (including clicking the overlay).
+ *
+ * @returns The modal's JSX element when active, or `null` when the wizard is not shown or the target id is missing.
+ */
 export function DeleteWizard(): JSX.Element | null {
   const target = deleteTarget.value;
   if (!showDeleteWizard.value || !target?.id) return null;

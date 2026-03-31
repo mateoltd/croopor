@@ -16,10 +16,26 @@ let suppressed = false;
 const FADE_MS = 800;
 export const musicStateVersion = signal(0);
 
+/**
+ * Signals that the module's music-related state has changed.
+ *
+ * Increments the internal `musicStateVersion` signal so reactive consumers re-evaluate.
+ */
 function notifyMusicState(): void {
   musicStateVersion.value += 1;
 }
 
+/**
+ * Progresses an in-flight volume fade and schedules the next frame until completion.
+ *
+ * Interpolates `audio.volume` between the current `fadeFrom` and `fadeTarget` based on `ts`
+ * over a duration of `FADE_MS`, clamping the result to the [0, 1] range. If the fade is not
+ * finished, requests the next animation frame; otherwise clears the fade state and invokes
+ * any pending `fadeCallback`. If the shared `audio` element is missing, clears fade state
+ * and invokes `fadeCallback` immediately.
+ *
+ * @param ts - The high-resolution timestamp passed from requestAnimationFrame
+ */
 function fadeStep(ts: number): void {
   if (!audio) {
     fadeRaf = null;
@@ -36,11 +52,22 @@ function fadeStep(ts: number): void {
   }
 }
 
+/**
+ * Cancels any in-progress volume fade and clears its completion callback.
+ *
+ * Stops the scheduled animation frame used for fading and removes the pending fade callback so it will not be invoked.
+ */
 function cancelFade(): void {
   if (fadeRaf) { cancelAnimationFrame(fadeRaf); fadeRaf = null; }
   fadeCallback = null;
 }
 
+/**
+ * Begins a smooth volume fade from the current audio volume to the specified target.
+ *
+ * @param target - Destination volume between 0 (muted) and 1 (full volume)
+ * @param cb - Optional callback invoked when the fade completes; if no audio element exists the callback is called immediately
+ */
 function startFade(target: number, cb?: () => void): void {
   cancelFade();
   if (!audio) { if (cb) cb(); return; }

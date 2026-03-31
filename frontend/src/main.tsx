@@ -23,6 +23,14 @@ import { closeDeleteWizard, bindDeleteWizard } from './delete-wizard';
 import { dismissDialog, showConfirm } from './dialogs';
 import { getNativeAppVersion } from './native';
 
+/**
+ * Bootstraps and initializes the client application UI and runtime state.
+ *
+ * Renders the app root, restores persisted UI state (shortcuts, theme, sound, sidebar filter, log panel state, collapsed groups, last page), loads native app version into `appVersion`, fetches backend data (`/config`, `/system`, `/status`, `/versions`, `/instances`) and applies configuration and system information to the UI, populates versions and instances, restores the last-selected instance, and starts onboarding or music-autoplay readiness as appropriate. After bootstrapping completes (or fails), binds all runtime event handlers.
+ *
+ * Notes:
+ * - On bootstrap failure the function sets `bootstrapError.value` and `bootstrapState.value = 'error'`.
+ */
 async function init(): Promise<void> {
   render(<App />, document.getElementById('app')!);
   const nativeVersion = await getNativeAppVersion();
@@ -93,6 +101,13 @@ async function init(): Promise<void> {
   bindEvents();
 }
 
+/**
+ * Updates UI controls and client subsystems from a backend configuration object.
+ *
+ * Applies the provided backend configuration to the UI: restores the saved username into the username input, sets the memory slider and its displayed value from `max_memory_mb`, applies the backend theme when the local theme is the default "obsidian" and the backend specifies a different theme (preserving custom hue, vibrancy, and lightness when available), and forwards configuration to the music subsystem.
+ *
+ * @param cfg - Backend configuration object (typically the result of GET /config); ignored when falsy
+ */
 function applyConfig(cfg: any): void {
   if (!cfg) return;
   const usernameInput = byId<HTMLInputElement>('username-input');
@@ -115,6 +130,15 @@ function applyConfig(cfg: any): void {
   Music.applyConfig(cfg);
 }
 
+/**
+ * Apply system memory information to the UI's memory controls.
+ *
+ * When `info.total_memory_mb` is present, updates the memory slider's maximum value to the system total (in GB),
+ * clamps the slider value if it exceeds that maximum, updates the displayed memory label, and refreshes the memory
+ * recommendation text shown to the user.
+ *
+ * @param info - Object containing system information; must include `total_memory_mb` (total physical memory in megabytes)
+ */
 function applySystemInfo(info: any): void {
   if (!info?.total_memory_mb) return;
   const memorySlider = byId<HTMLInputElement>('memory-slider');
@@ -131,6 +155,13 @@ function applySystemInfo(info: any): void {
   }
 }
 
+/**
+ * Attaches all UI event handlers and keyboard shortcuts to enable interactive behavior across the app.
+ *
+ * Wires controls for search, memory sliders, username persistence, log panel interactions (expand, filter, resize),
+ * settings navigation and save/cancel, music and onboarding controls, theme/color selection, developer actions,
+ * and global keyboard shortcuts (including shortcut hints and prioritized close behavior).
+ */
 function bindEvents(): void {
   const versionSearch = byId<HTMLInputElement>('version-search');
   const memorySlider = byId<HTMLInputElement>('memory-slider');

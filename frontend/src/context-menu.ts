@@ -8,6 +8,14 @@ import { instances } from './store';
 
 let ctxMenuVersion: Record<string, any> | null = null;
 
+/**
+ * Show the context menu for a specific instance positioned at the mouse cursor.
+ *
+ * Prevents the default context-menu behavior and sets the module context to the provided instance so menu actions target that instance. The menu will be clamped to remain inside the viewport.
+ *
+ * @param e - The triggering mouse event, used to position the menu
+ * @param inst - The instance object to target; its `id` is used as the menu context
+ */
 export function showInstanceContextMenu(e: MouseEvent, inst: Record<string, any>): void {
   e.preventDefault();
   ctxMenuVersion = { id: inst.id, _instance: inst }; // reuse ctxMenuVersion slot
@@ -27,6 +35,12 @@ export function showInstanceContextMenu(e: MouseEvent, inst: Record<string, any>
   Sound.ui('soft');
 }
 
+/**
+ * Displays the shared context menu for a specific version and sets that version as the current menu target.
+ *
+ * @param e - The mouse event that triggered the menu (used for positioning and to prevent the default context menu).
+ * @param version - The version object to associate with the opened context menu.
+ */
 export function showContextMenu(e: MouseEvent, version: Record<string, any>): void {
   e.preventDefault();
   ctxMenuVersion = version;
@@ -49,12 +63,29 @@ export function showContextMenu(e: MouseEvent, version: Record<string, any>): vo
   Sound.ui('soft');
 }
 
+/**
+ * Hides the shared context menu and clears its currently targeted item.
+ *
+ * If the DOM element with id `ctx-menu` exists, the function adds the `hidden`
+ * class to hide it and resets the module-level `ctxMenuVersion` to `null`.
+ */
 export function hideContextMenu(): void {
   const menu = document.getElementById('ctx-menu');
   if (menu) menu.classList.add('hidden');
   ctxMenuVersion = null;
 }
 
+/**
+ * Register global hide behavior and attach click handlers for the shared `#ctx-menu` element.
+ *
+ * Wires document `click` and `contextmenu` listeners to hide the menu when interacting outside it, and attaches handlers for menu actions:
+ * - "Open folder": sends a POST to open the targeted instance's or version's folder.
+ * - "Copy id": writes the instance `version_id` or version `id` to the clipboard.
+ * - "Rename": prompts to rename an instance, validates against duplicate names, updates the instance via API, and updates local state on success.
+ * - "Delete": for instances, confirms and deletes via API then removes the instance from local state; for versions, opens the delete wizard.
+ *
+ * Handlers use the module-level `ctxMenuVersion` to determine whether the target is an instance (has `_instance`) or a version. Async errors from API or prompt flows are surfaced via `showError` where applicable.
+ */
 export function bindContextMenu(): void {
   document.addEventListener('click', (e: MouseEvent) => {
     const menu = document.getElementById('ctx-menu');

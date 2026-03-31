@@ -9,6 +9,12 @@ import { parseVersionDisplay } from '../utils';
 
 const KNOWN_LOADERS = new Set(['fabric', 'quilt', 'forge', 'neoforge']);
 
+/**
+ * Renders a small inline SVG icon representing the specified loader identifier.
+ *
+ * @param loader - Loader identifier. Supported values: `fabric`, `quilt`, `forge`, `neoforge`. Any other value produces no icon.
+ * @returns An SVG element for the given loader identifier, or `null` when the loader is unsupported.
+ */
 function LoaderIcon({ loader }: { loader: string }): JSX.Element | null {
   switch (loader) {
     case 'fabric':
@@ -142,6 +148,15 @@ interface InstanceItemProps {
   onContextMenu: (e: MouseEvent, inst: Instance) => void;
 }
 
+/**
+ * Render a selectable instance/version button showing name, loader/type badge, running status, and installation progress.
+ *
+ * @param instance - The instance to render
+ * @param version - The resolved version data for the instance, or `undefined` if unavailable
+ * @param index - Zero-based position used to stagger the entry's animation delay
+ * @param onContextMenu - Callback invoked when the item is context-clicked; receives the mouse event and the instance
+ * @returns The JSX element for the version/instance list item
+ */
 export function InstanceItem({ instance, version, index, onContextMenu }: InstanceItemProps) {
   const isModded = !!version?.inherits_from;
   const pd = useComputed(() =>

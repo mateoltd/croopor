@@ -19,7 +19,8 @@ type quiltLoader struct {
 	client *http.Client
 }
 
-// NewQuiltLoader creates a Quilt loader backed by the given cache.
+// NewQuiltLoader constructs a Loader that implements the Quilt mod loader using the provided MetaCache.
+// The returned loader uses an HTTP client configured with a 30-second timeout for meta API requests.
 func NewQuiltLoader(cache *MetaCache) Loader {
 	return &quiltLoader{
 		cache:  cache,

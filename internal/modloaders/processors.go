@@ -35,7 +35,9 @@ type dataEntry struct {
 }
 
 // RunForgeProcessors executes the processors from an install_profile.json.
-// This patches the Minecraft client JAR and generates required artifacts.
+// RunForgeProcessors executes Forge/NeoForge "processors" from an install_profile.json to patch the client and produce any required artifacts.
+// It filters processors to the client side, builds library and data variable lookups (including extracting embedded installer resources when needed), runs each processor sequentially using an appropriate Java runtime, and emits progress updates on the provided channel.
+// The function returns an error if the install profile cannot be parsed, a suitable Java runtime cannot be found, processor data variables cannot be built, or if any processor fails.
 func RunForgeProcessors(mcDir, mcVersion, versionID string, installProfileData, installerData []byte, progress chan<- Progress) error {
 	var profile installProfileJSON
 	if err := json.Unmarshal(installProfileData, &profile); err != nil {
@@ -106,6 +108,12 @@ func RunForgeProcessors(mcDir, mcVersion, versionID string, installProfileData, 
 	return nil
 }
 
+// runProcessor resolves a processor's JAR and classpath entries, determines its main class
+// from the JAR manifest, substitutes placeholders in the processor arguments, and invokes
+// the processor using the specified Java executable with working directory set to libDir.
+// It returns an error if the processor JAR cannot be resolved, if the manifest does not
+// provide a Main-Class, or if the Java process exits with an error (the returned error
+// includes the process's combined output).
 func runProcessor(javaPath string, proc processor, libPaths map[string]string, dataVars map[string]string, libDir string) error {
 	// Build classpath: processor JAR + its classpath entries
 	var cpParts []string
@@ -164,6 +172,8 @@ func runProcessor(javaPath string, proc processor, libPaths map[string]string, d
 	return nil
 }
 
+// readMainClassFromJar extracts the `Main-Class` entry from the `META-INF/MANIFEST.MF` of the given JAR file.
+// It returns the value of the `Main-Class` header, or an error if the JAR cannot be read or the manifest does not contain a `Main-Class`.
 func readMainClassFromJar(jarPath string) (string, error) {
 	f, err := os.Open(jarPath)
 	if err != nil {
@@ -204,6 +214,14 @@ func readMainClassFromJar(jarPath string) (string, error) {
 	return "", fmt.Errorf("no Main-Class in manifest")
 }
 
+// substituteArg resolves processor argument placeholders.
+// It accepts three placeholder forms and returns the resolved value or the original arg when unresolved.
+//
+// - If arg is in the form [group:artifact:version] it is treated as a Maven coordinate:
+//   it returns libPaths[coordinate] if present, otherwise returns filepath.Join(libDir, minecraft.MavenToPath(coordinate))
+//   when MavenToPath yields a non-empty path.
+// - If arg is in the form {KEY} it returns dataVars[KEY] when present.
+// - For any other form or when lookups fail, it returns arg unchanged.
 func substituteArg(arg string, libPaths, dataVars map[string]string, libDir string) string {
 	// [artifact:coordinate] -> library path
 	if strings.HasPrefix(arg, "[") && strings.HasSuffix(arg, "]") {
@@ -230,6 +248,22 @@ func substituteArg(arg string, libPaths, dataVars map[string]string, libDir stri
 	return arg
 }
 
+// buildDataVars builds the processor data variable map used by Forge processors.
+// It converts `data` entries' Client values into concrete filesystem paths or literal strings,
+// extracting files from the installer JAR when values are installer-relative paths.
+//
+// For each entry:
+// - If the Client value is of the form `[group:artifact:version:classifier?]`, it is converted
+//   to a library path under the instance's library directory.
+// - If the Client value begins with `/`, the referenced entry is extracted from `installerData`
+//   into a temporary directory (created once) and the extracted file path is used.
+// - Otherwise the Client value is used verbatim.
+//
+// The function also injects standard variables:
+// `MINECRAFT_JAR`, `SIDE` (set to "client"), `MINECRAFT_VERSION`, `ROOT`, and `LIBRARY_DIR`.
+//
+// It returns the populated variable map, the temporary directory path if one was created
+// (empty string otherwise), and a non-nil error if temp directory creation or file extraction fails.
 func buildDataVars(data map[string]dataEntry, mcDir, mcVersion, versionID string, installerData []byte) (map[string]string, string, error) {
 	vars := map[string]string{}
 	tempDir := ""
@@ -280,7 +314,9 @@ func buildDataVars(data map[string]dataEntry, mcDir, mcVersion, versionID string
 	return vars, tempDir, nil
 }
 
-// extractFromInstallerJar extracts a single entry from the installer JAR ZIP to tempDir.
+// extractFromInstallerJar extracts the zip entry named entryPath from jarData into tempDir and returns the written file's absolute path.
+// If the entry is not found or any error occurs while reading or writing, it returns an empty string.
+// entryPath is the path inside the ZIP (use forward slashes); parent directories under tempDir are created as needed.
 func extractFromInstallerJar(jarData []byte, entryPath, tempDir string) string {
 	r, err := zip.NewReader(bytes.NewReader(jarData), int64(len(jarData)))
 	if err != nil {
@@ -311,6 +347,11 @@ func extractFromInstallerJar(jarData []byte, entryPath, tempDir string) string {
 	return ""
 }
 
+// findJavaForProcessors locates a Java runtime suitable for running Forge processors.
+// It first attempts known bundled Java components via minecraft.FindJava; if none
+// succeed it falls back to searching for a system `java` (or `javaw.exe` on Windows)
+// on the PATH. If no runtime can be found, it returns an error recommending the base
+// game version be installed so Java can be downloaded.
 func findJavaForProcessors(mcDir string) (string, error) {
 	// Try common Java version components
 	components := []string{"java-runtime-delta", "java-runtime-gamma", "java-runtime-beta", "java-runtime-alpha", "jre-legacy"}

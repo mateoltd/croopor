@@ -40,6 +40,11 @@ func (s *Server) SetMCDir(dir string) {
 	s.mu.Unlock()
 }
 
+// NewServer creates and initializes a Server configured with the provided
+// Minecraft directory, configuration, instance store, and frontend filesystem.
+// The returned Server includes session, install, and loader-install managers,
+// an HTTP ServeMux with API and frontend routes registered, and mod loader
+// backends (Fabric, Quilt, Forge, NeoForge) registered with a 15-minute metadata cache.
 func NewServer(mcDir string, cfg *config.Config, instances *instance.InstanceStore, frontend fs.FS) *Server {
 	s := &Server{
 		mcDir:          mcDir,

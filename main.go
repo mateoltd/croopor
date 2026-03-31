@@ -17,6 +17,14 @@ import (
 
 var version = "1.1.0"
 
+// main is the program entry point that initializes configuration, locates and validates
+// the Minecraft directory, loads persisted instances, prepares the embedded frontend,
+// constructs the server and Wails application, and starts the GUI.
+//
+// It accepts an optional -mc-dir flag to override the Minecraft directory. If config
+// loading or instance loading fail, defaults are used and a warning is logged. If the
+// frontend assets cannot be prepared or the Wails app fails to start, the process
+// terminates with a fatal log message.
 func main() {
 	mcDir := flag.String("mc-dir", "", "Override .minecraft directory path")
 	flag.Parse()

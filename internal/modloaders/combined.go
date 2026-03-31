@@ -14,7 +14,8 @@ type CombinedInstall struct {
 	ProgressCh chan minecraft.DownloadProgress
 }
 
-// NewCombinedInstall creates a combined installer with a buffered progress channel.
+// NewCombinedInstall creates a combined installer that provides a buffered progress channel.
+// The returned CombinedInstall has ProgressCh initialized as a buffered channel with capacity 64.
 func NewCombinedInstall() *CombinedInstall {
 	return &CombinedInstall{
 		ProgressCh: make(chan minecraft.DownloadProgress, 64),

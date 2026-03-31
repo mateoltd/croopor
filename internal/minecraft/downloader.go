@@ -258,7 +258,7 @@ func (d *Downloader) resolveManifestURL(versionID string) (string, error) {
 	return "", fmt.Errorf("version %s not found in manifest", versionID)
 }
 
-// FilterLibraries returns only the libraries whose rules match the given environment.
+// FilterLibraries filters the provided libraries and returns a slice containing only those whose rule sets are satisfied by the given environment.
 func FilterLibraries(libs []Library, env Environment) []Library {
 	var result []Library
 	for _, lib := range libs {
@@ -270,7 +270,12 @@ func FilterLibraries(libs []Library, env Environment) []Library {
 }
 
 // ResolveLibDownload determines the local path, download URL, and expected SHA1
-// for a library's main artifact.
+// ResolveLibDownload determines the filesystem path, download URL, and expected SHA1 for a library's main artifact.
+// 
+// If the library exposes a Downloads.Artifact entry, its Path (converted to OS separators), URL, and SHA1 are returned.
+// Otherwise the library's Maven coordinate is converted to a repository path located under LibrariesDir(mcDir); the returned
+// URL is formed from lib.URL if set or the default "https://libraries.minecraft.net/" plus the Maven path, and the library's
+// SHA1 field is returned. If the Maven path cannot be derived, empty strings are returned.
 func ResolveLibDownload(lib Library, mcDir string) (path, url, sha1 string) {
 	libDir := LibrariesDir(mcDir)
 
@@ -298,7 +303,10 @@ func (d *Downloader) downloadFile(url, destPath, expectedSHA1 string) error {
 }
 
 // DownloadFile downloads a URL to destPath with optional SHA1 verification.
-// It writes to a .tmp file first and renames on success for atomicity.
+// DownloadFile downloads the resource at url and writes it to destPath.
+// It writes to a temporary file in the destination directory and atomically renames it to destPath on success.
+// If expectedSHA1 is non-empty, the downloaded content must match that SHA1 or an error is returned.
+// The provided http.Client is used for the request; a non-200 HTTP status or any I/O error is returned.
 func DownloadFile(client *http.Client, url, destPath, expectedSHA1 string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return err
@@ -340,7 +348,8 @@ func DownloadFile(client *http.Client, url, destPath, expectedSHA1 string) error
 	return os.Rename(tmpPath, destPath)
 }
 
-// FileExistsWithSHA1 checks whether a file exists and optionally matches the expected hash.
+// FileExistsWithSHA1 reports whether the file at path exists and, if expectedSHA1 is non-empty, whether its SHA-1 hash matches expectedSHA1.
+// It returns true if the file exists and either expectedSHA1 is empty or the file's SHA-1 equals expectedSHA1; otherwise false.
 func FileExistsWithSHA1(path, expectedSHA1 string) bool {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false

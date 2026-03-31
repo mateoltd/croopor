@@ -7,6 +7,15 @@ import { parseVersionDisplay, formatRelativeTime } from '../utils';
 import { api } from '../api';
 import { Sound } from '../sound';
 
+/**
+ * Compute the CSS class and short label used for a version badge.
+ *
+ * Maps modded, release, snapshot, and other/unknown version types to a badge class and a concise text label.
+ *
+ * @param version - Version metadata (may be null); `inherits_from` marks a modded version and `type` provides a fallback type.
+ * @param versionType - Optional explicit version type to prefer over `version.type`.
+ * @returns An object with `cls` (CSS class for the badge) and `text` (short uppercase label: `'MOD'` for modded, `'REL'` for release, `'SNAP'` for snapshot, or up to four characters of the version type, or `'?'` if unknown).
+ */
 function badgeInfo(version: Version | null, versionType: string): { cls: string; text: string } {
   const isModded = !!version?.inherits_from;
   const vType = versionType || version?.type || '';
@@ -21,16 +30,36 @@ function badgeInfo(version: Version | null, versionType: string): { cls: string;
   return { cls, text };
 }
 
+/**
+ * Map a JVM preset identifier to its human-readable label.
+ *
+ * @param preset - The JVM preset identifier (for example, `'aikar'` or `'zgc'`)
+ * @returns The corresponding display label, or `null` if the preset is not recognized
+ */
 function jvmPresetLabel(preset: string): string | null {
   if (preset === 'aikar') return "Aikar's Flags";
   if (preset === 'zgc') return 'ZGC';
   return null;
 }
 
+/**
+ * Renders a middle dot separator used between metadata items.
+ *
+ * @returns A JSX span element with class `meta-dot` containing a middle dot character
+ */
 function MetaDot(): JSX.Element {
   return <span class="meta-dot">{'\u00b7'}</span>;
 }
 
+/**
+ * Render the detailed view for the currently selected instance.
+ *
+ * Renders the instance header (name and badge), a dot-separated metadata row
+ * (version display, Java major, JVM preset, status, last-played), and folder
+ * action buttons for the instance.
+ *
+ * @returns A JSX element containing the instance details, or `null` when no instance is selected.
+ */
 export function InstanceDetail(): JSX.Element | null {
   const inst = selectedInstance.value;
   if (!inst) return null;

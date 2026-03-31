@@ -7,14 +7,15 @@ var (
 	registry = map[LoaderType]Loader{}
 )
 
-// Register adds a loader to the global registry.
+// Register adds the given Loader to the global registry, storing it under the Loader's type and overwriting any existing loader for that type.
 func Register(l Loader) {
 	mu.Lock()
 	registry[l.Type()] = l
 	mu.Unlock()
 }
 
-// Get returns a registered loader by type.
+// Get returns the loader registered for the given LoaderType and a boolean
+// that is true if a loader for that type exists.
 func Get(t LoaderType) (Loader, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
@@ -33,7 +34,9 @@ func All() []Loader {
 	return out
 }
 
-// AllInfo returns display metadata for every registered loader.
+// AllInfo returns a slice of LoaderInfo containing the display metadata for all loaders
+// currently registered in the global registry. The order of elements in the returned slice
+// is unspecified.
 func AllInfo() []LoaderInfo {
 	mu.RLock()
 	defer mu.RUnlock()

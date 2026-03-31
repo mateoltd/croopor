@@ -14,7 +14,9 @@ var DefaultClient = &http.Client{Timeout: 5 * time.Minute}
 
 // DownloadLibraries downloads a list of Minecraft-format libraries into the
 // shared libraries directory. It skips files that already exist with matching
-// SHA1 hashes and reports progress on the provided channel.
+// DownloadLibraries downloads the Minecraft-format libraries for the given libs into the shared libraries directory for mcDir, skipping files that already match the expected SHA1 and emitting progress updates on the progress channel.
+// 
+// The function filters the provided libraries using the default environment, resolves each library to a local path and download URL, creates parent directories as needed, and verifies downloaded content against the resolved SHA1. Progress messages are sent with Phase "loader_libraries" and include Current, Total, and Detail (the target file's base name). The first error encountered is returned.
 func DownloadLibraries(libs []minecraft.Library, mcDir string, progress chan<- Progress) error {
 	env := minecraft.DefaultEnvironment()
 	filtered := minecraft.FilterLibraries(libs, env)

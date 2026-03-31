@@ -9,10 +9,24 @@ import { NewInstanceModal } from './NewInstanceModal';
 import { DeleteWizard } from './DeleteWizard';
 import { ToastViewport } from './ToastViewport';
 
+/**
+ * Normalize a version string so it is prefixed with a leading `v`.
+ *
+ * @param version - The version identifier, which may already start with `v`
+ * @returns The input `version` ensured to start with `v` (adds `v` if missing)
+ */
 function displayVersion(version: string): string {
   return version.startsWith('v') ? version : `v${version}`;
 }
 
+/**
+ * Render the empty-state panel used in the launcher sidebar.
+ *
+ * Displays an icon, a title and subtitle that reflect bootstrap state (`loading`, `error`, or normal/empty),
+ * and shows a "New Instance" button when there are no instances. The panel is hidden when an instance is selected.
+ *
+ * @returns The JSX element representing the empty-state UI
+ */
 function EmptyState(): JSX.Element {
   const boot = bootstrapState.value;
   const error = bootstrapError.value;
@@ -51,6 +65,13 @@ function EmptyState(): JSX.Element {
   );
 }
 
+/**
+ * Renders the application's full UI layout including the top header, sidebar (launcher and settings), center page stack, log panel, context menu, onboarding/setup overlays, and global modals.
+ *
+ * The rendered markup conditionally shows launcher vs. settings panels and instance details based on reactive state (e.g., `currentPage` and `selectedInstance`).
+ *
+ * @returns The root JSX element for the application layout
+ */
 export function App(): JSX.Element {
   const page = currentPage.value;
 

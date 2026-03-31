@@ -15,6 +15,8 @@ type App struct {
 	server  *server.Server
 }
 
+// NewApp creates and returns a new App configured with the provided version and server.
+// The returned App's ctx is not initialized; call startup to set the Wails context before using context-dependent methods.
 func NewApp(version string, srv *server.Server) *App {
 	return &App{version: version, server: srv}
 }

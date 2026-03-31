@@ -11,6 +11,13 @@ export const LOGO_BASE_HUE: number = 106;
 
 export const defaults: LocalPrefs = { theme: 'obsidian', customHue: 140, customVibrancy: 100, lightness: 0, logExpanded: false, logHeight: 0, collapsedGroups: {}, sidebarFilter: 'all', sounds: true, shortcuts: {} };
 
+/**
+ * Load persisted UI preferences, applying any saved values on top of the defaults.
+ *
+ * Attempts to read and parse JSON from `localStorage` under `STORAGE_KEY`; returns an object where stored properties overlay `defaults`, or a fresh copy of `defaults` if no stored data exists or an error occurs.
+ *
+ * @returns The resulting `LocalPrefs` object (stored values merged over defaults, or defaults on failure).
+ */
 export function loadLocalState(): LocalPrefs {
   try { const r: string | null = localStorage.getItem(STORAGE_KEY); return r ? { ...defaults, ...JSON.parse(r) } : { ...defaults }; } catch { return { ...defaults }; }
 }
@@ -18,6 +25,11 @@ export function loadLocalState(): LocalPrefs {
 export const local: LocalPrefs = loadLocalState();
 export const localStateVersion = signal(0);
 
+/**
+ * Persist current local preferences to browser storage and bump the local state version signal.
+ *
+ * Attempts to write `local` to `localStorage` under `STORAGE_KEY`; storage errors are ignored and `localStateVersion.value` is incremented regardless.
+ */
 export function saveLocalState(): void {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(local)); } catch {}
   localStateVersion.value += 1;

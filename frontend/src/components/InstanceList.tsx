@@ -11,6 +11,15 @@ interface InstanceGroups {
   other: Instance[];
 }
 
+/**
+ * Render the instances list UI, showing bootstrap loading/error/empty states or grouped instance groups.
+ *
+ * Groups filtered instances into `release`, `modded`, `snapshot`, and `other` using the current version map,
+ * and renders either status placeholders or four corresponding InstanceGroup components.
+ *
+ * @returns The component's JSX: a placeholder for loading/error/empty/no-match states or four InstanceGroup elements
+ * grouped by `release`, `modded`, `snapshot`, and `other`.
+ */
 export function InstanceList() {
   const boot = bootstrapState.value;
   const error = bootstrapError.value;

@@ -4,11 +4,24 @@ import { byId } from './dom';
 import { Sound } from './sound';
 import { config } from './store';
 
-// WCAG 2.1 contrast helpers
+/**
+ * Convert an sRGB channel value (0–1) to its linear RGB equivalent.
+ *
+ * @param c - sRGB channel value in the range 0 to 1
+ * @returns The corresponding linear RGB channel value
+ */
 function srgbToLinear(c: number): number {
   return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
+/**
+ * Converts an HSL color to its relative luminance used for WCAG contrast calculations.
+ *
+ * @param h - Hue in degrees (values wrap cyclically)
+ * @param s - Saturation as a percentage (0–100)
+ * @param l - Lightness as a percentage (0–100)
+ * @returns The relative luminance in the range 0 (darkest) to 1 (lightest)
+ */
 function hslToLuminance(h: number, s: number, l: number): number {
   s /= 100; l /= 100;
   const a = s * Math.min(l, 1 - l);
@@ -16,16 +29,35 @@ function hslToLuminance(h: number, s: number, l: number): number {
   return 0.2126 * srgbToLinear(f(0)) + 0.7152 * srgbToLinear(f(8)) + 0.0722 * srgbToLinear(f(4));
 }
 
+/**
+ * Compute the WCAG contrast ratio between two relative luminance values.
+ *
+ * @param l1 - First relative luminance (0 to 1)
+ * @param l2 - Second relative luminance (0 to 1)
+ * @returns The contrast ratio ((lighter + 0.05) / (darker + 0.05)), a number ≥ 1
+ */
 function contrastRatio(l1: number, l2: number): number {
   const [a, b] = l1 > l2 ? [l1, l2] : [l2, l1];
   return (a + 0.05) / (b + 0.05);
 }
 
+/**
+ * Parses a CSS HSL color string into numeric hue, saturation, and lightness components.
+ *
+ * @param str - The HSL string in the form `hsl(<h>,<s>%,<l>%)` where `<h>` is degrees and `<s>`, `<l>` are percentages
+ * @returns An array `[h, s, l]` with `h` in degrees and `s`/`l` as percentage values, or `null` if the input doesn't match the expected format
+ */
 function parseHSL(str: string): [number, number, number] | null {
   const m = str.match(/hsl\((\d+),(\d+)%,([.\d]+)%\)/);
   return m ? [+m[1], +m[2], +m[3]] : null;
 }
 
+/**
+ * Compute the WCAG contrast ratio between the theme's text and background colors.
+ *
+ * @param vars - A mapping of CSS variable names to values; expects `--text` and `--bg` to be HSL strings (e.g. `hsl(210,50%,40%)`)
+ * @returns The contrast ratio between `--text` and `--bg`; `Infinity` if either value cannot be parsed
+ */
 function checkContrast(vars: Record<string, string>): number {
   const text = parseHSL(vars['--text']);
   const bg = parseHSL(vars['--bg']);
@@ -33,10 +65,23 @@ function checkContrast(vars: Record<string, string>): number {
   return contrastRatio(hslToLuminance(...text), hslToLuminance(...bg));
 }
 
+/**
+ * Determines whether a theme produced from the given hue, vibrancy, and lightness has insufficient contrast.
+ *
+ * @returns `true` if the generated theme's WCAG contrast ratio is less than 4.5, `false` otherwise.
+ */
 export function isLowContrastTheme(hue: number, vibrancy: number, lightness: number): boolean {
   return checkContrast(generateThemeFromHue(hue, vibrancy, lightness)) < 4.5;
 }
 
+/**
+ * Finds a lightness value (0–100) starting from `currentLt` that yields a WCAG contrast ratio of at least 4.5 for the given hue and vibrancy.
+ *
+ * @param hue - Accent hue in degrees (0–360).
+ * @param vibrancy - Vibrancy as a percentage (0–100).
+ * @param currentLt - Starting lightness as a percentage (0–100).
+ * @returns The first lightness (0–100) encountered when moving from `currentLt` toward the nearest boundary (0 if decreasing, 100 if increasing) that produces contrast ≥ 4.5; if none is found, returns `100` when searching upward or `0` when searching downward.
+ */
 export function findFixedLightness(hue: number, vibrancy: number, currentLt: number): number {
   const dir = currentLt < 50 ? -1 : 1;
   for (let lt = currentLt; lt >= 0 && lt <= 100; lt += dir) {
@@ -46,7 +91,16 @@ export function findFixedLightness(hue: number, vibrancy: number, currentLt: num
   return dir > 0 ? 100 : 0;
 }
 
-// generateThemeFromHue — exact copy from original lines 295-330
+/**
+ * Generate a set of CSS custom properties for a theme derived from a base HSL hue.
+ *
+ * Produces variables for background, surfaces, accent, text, borders, shadows, and a few fixed accents. If `vibrancy` or `lightness` are omitted, they default to 100 and 0 respectively.
+ *
+ * @param hue - Base hue in degrees (0–360) used for all generated HSL colors
+ * @param vibrancy - Saturation percentage (0–100) that modulates generated saturations
+ * @param lightness - Lightness percentage (0–100) that mixes colors toward lighter variants
+ * @returns A record mapping CSS custom property names (e.g., `--bg`, `--accent`, `--text`) to color strings (`hsl`, `hsla`, or `rgba`)
+ */
 export function generateThemeFromHue(hue: number, vibrancy: number, lightness: number): Record<string, string> {
   const v = (vibrancy != null ? vibrancy : 100) / 100;
   const l = (lightness != null ? lightness : 0) / 100;
@@ -89,7 +143,16 @@ interface ApplyThemeOptions {
   lightness?: number;
 }
 
-// applyTheme — exact copy from original lines 332-371
+/**
+ * Apply a theme to the document, update local and remote configuration, and refresh related UI elements.
+ *
+ * @param theme - The theme name to apply (a preset name or `'custom'`).
+ * @param hue - Accent hue used for custom themes; ignored for preset themes.
+ * @param options - Optional overrides:
+ *   - `silent` — when true, suppresses remote persistence and sound effects.
+ *   - `vibrancy` — override vibrancy for custom theme generation.
+ *   - `lightness` — override lightness (0–100) for theme generation and color mode.
+ */
 export function applyTheme(theme: string, hue: number | null, options: ApplyThemeOptions = {}): void {
   const { silent = false, vibrancy, lightness } = options;
   const el = document.documentElement;
@@ -145,7 +208,15 @@ export function applyTheme(theme: string, hue: number | null, options: ApplyThem
   if (!silent) Sound.ui('theme');
 }
 
-// animateMarkerToHue — exact copy from lines 373-380
+/**
+ * Animates a color-field marker to the specified hue position and updates its color.
+ *
+ * Does nothing if `field` or `marker` is null.
+ *
+ * @param field - The color field container element that the marker belongs to (nullable).
+ * @param marker - The marker element to animate and recolor (nullable).
+ * @param hue - Target hue in degrees (0–360) used to position and color the marker.
+ */
 export function animateMarkerToHue(field: HTMLElement | null, marker: HTMLElement | null, hue: number): void {
   if (!field || !marker) return;
   marker.classList.add('animating');
@@ -155,7 +226,14 @@ export function animateMarkerToHue(field: HTMLElement | null, marker: HTMLElemen
   setTimeout(() => marker.classList.remove('animating'), 380);
 }
 
-// positionFieldMarker — exact copy from lines 434-439
+/**
+ * Position and style a color-field marker according to the given hue and vibrancy.
+ *
+ * @param field - The color field container element used to compute relative positions
+ * @param marker - The marker element to position and color
+ * @param hue - Hue angle in degrees (0–360)
+ * @param vibrancy - Vibrancy as a percentage (0–100)
+ */
 export function positionFieldMarker(field: HTMLElement | null, marker: HTMLElement | null, hue: number, vibrancy: number): void {
   if (!field || !marker) return;
   marker.style.left = `${(hue / 360) * 100}%`;
@@ -163,10 +241,23 @@ export function positionFieldMarker(field: HTMLElement | null, marker: HTMLEleme
   marker.style.background = `hsl(${hue},65%,55%)`;
 }
 
-// initColorField — exact copy from lines 441-465
+/**
+ * Sets up pointer-based dragging on a color picker field to update hue and vibrancy.
+ *
+ * @param field - The color field element to attach pointer listeners to; if `null`, the function does nothing.
+ * @param marker - The marker element to position within the field to reflect the current hue/vibrancy; may be `null`.
+ * @param onDrag - Callback invoked while dragging with the computed `hue` (0–360 degrees) and `vibrancy` (0–100 percent).
+ * @param onEnd - Optional callback invoked when the pointer interaction ends.
+ */
 export function initColorField(field: HTMLElement | null, marker: HTMLElement | null, onDrag: (hue: number, vibrancy: number) => void, onEnd?: () => void): void {
   if (!field) return;
   let active = false;
+  /**
+   * Convert a pointer event on the color field to hue and vibrancy coordinates.
+   *
+   * @param e - Pointer event occurring over the color field element
+   * @returns An object containing `hue` (0–360) and `vibrancy` (0–100)
+   */
   function calc(e: PointerEvent): { hue: number; vibrancy: number } {
     const r = field!.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));

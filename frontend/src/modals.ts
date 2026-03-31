@@ -9,16 +9,31 @@ import { showNewInstanceModal } from './components/NewInstanceModal';
 import { browseDirectory } from './native';
 import { config, systemInfo } from './store';
 
+/**
+ * Shows the New Instance modal.
+ */
 export async function openNewInstanceFlow(): Promise<void> {
   showNewInstanceModal.value = true;
 }
 
+/**
+ * Closes the new-instance modal if it is currently open.
+ *
+ * Hides the modal and plays a soft UI sound; does nothing when the modal is already closed.
+ */
 export function closeNewInstanceFlow(): void {
   if (!showNewInstanceModal.value) return;
   showNewInstanceModal.value = false;
   Sound.ui('soft');
 }
 
+/**
+ * Shows the setup overlay, wires its controls for selecting or creating a directory, and resolves when the overlay is closed.
+ *
+ * The function also attempts to prefill the "new path" input from server-provided defaults.
+ *
+ * @returns A promise that resolves when the setup overlay is hidden
+ */
 export function showSetup(): Promise<void> {
   return new Promise((resolve: () => void) => {
     const overlay = byId<HTMLElement>('setup-overlay');
@@ -127,6 +142,14 @@ export function showSetup(): Promise<void> {
   });
 }
 
+/**
+ * Shows the onboarding UI and initializes its memory and theme controls.
+ *
+ * If system memory information is available, updates the displayed total RAM,
+ * configures the memory slider's max and value with a recommended allocation,
+ * and updates the recommendation text and formatted memory value.
+ * Positions the onboarding color field marker using stored theme values.
+ */
 export function showOnboarding(): void {
   byId<HTMLElement>('onboarding')?.classList.remove('hidden');
   if (systemInfo.value?.total_memory_mb) {
@@ -150,8 +173,20 @@ export function showOnboarding(): void {
 let obStep: number = 1;
 const OB_STEPS: number = 5;
 
+/**
+ * Retrieve the current onboarding step number.
+ *
+ * @returns The current onboarding step as an integer between 1 and 5 (1-based).
+ */
 export function getObStep(): number { return obStep; }
 
+/**
+ * Move the onboarding UI to the specified step and update related controls.
+ *
+ * Clamps `n` into the valid step range, shows the corresponding step panel, marks the matching progress dot as active, shows or hides the back button, updates the next button label ("Continue" or "Let's go"), and focuses the username input when moving to step 1.
+ *
+ * @param n - Target onboarding step index (1-based)
+ */
 export function onboardingStep(n: number): void {
   obStep = Math.max(1, Math.min(OB_STEPS, n));
   const steps: Array<HTMLElement | null> = [
@@ -167,15 +202,28 @@ export function onboardingStep(n: number): void {
   if (obStep === 1) byId<HTMLInputElement>('onboarding-username')?.focus();
 }
 
+/**
+ * Advance the onboarding UI to the next step; when currently on the final step, complete the onboarding flow.
+ */
 export function onboardingNext(): void {
   if (obStep < OB_STEPS) onboardingStep(obStep + 1);
   else finishOnboarding();
 }
 
+/**
+ * Navigate the onboarding UI to the previous step.
+ *
+ * Does nothing when already on the first step.
+ */
 export function onboardingBack(): void {
   if (obStep > 1) onboardingStep(obStep - 1);
 }
 
+/**
+ * Finalizes onboarding by applying chosen settings, persisting configuration, and closing the onboarding UI.
+ *
+ * Reads the entered username, memory selection, and music preference; updates corresponding inputs and labels in the main UI; attempts to persist the configuration and mark onboarding complete (network errors are ignored); hides the onboarding container; applies the music configuration and starts playback if music was enabled.
+ */
 export async function finishOnboarding(): Promise<void> {
   const username: string = byId<HTMLInputElement>('onboarding-username')?.value.trim() || 'Player';
   const memGB: number = parseFloat(byId<HTMLInputElement>('onboarding-memory-slider')?.value || '4');

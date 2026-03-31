@@ -35,6 +35,11 @@ const JVM_PRESETS = [
   },
 ] as const;
 
+/**
+ * Compute inline CSS for the color-field marker using the current custom hue and vibrancy.
+ *
+ * @returns An object containing `left` (horizontal position as a percent string), `top` (vertical position as a percent string), and `background` (HSL color string) suitable for use as inline CSS on the marker element.
+ */
 function markerStyle(): JSX.CSSProperties {
   return {
     left: `${(local.customHue / 360) * 100}%`,
@@ -43,6 +48,13 @@ function markerStyle(): JSX.CSSProperties {
   };
 }
 
+/**
+ * Render the launcher's settings UI and bind its controls to the application's state and stores.
+ *
+ * Renders sections for appearance (theme swatches, custom color picker, lightness and WCAG fix, UI sounds and background music), launch window defaults, Java runtime selection and JVM presets, keyboard shortcuts (with recording/reset), and developer maintenance tools (visible in dev mode).
+ *
+ * @returns The settings view as a JSX element
+ */
 export function SettingsView(): JSX.Element {
   const soundDisableTimer = useRef<number | null>(null);
   localStateVersion.value;

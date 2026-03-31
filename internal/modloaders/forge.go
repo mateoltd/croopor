@@ -27,7 +27,7 @@ type forgeLoader struct {
 	client *http.Client
 }
 
-// NewForgeLoader creates a Forge loader backed by the given cache.
+// NewForgeLoader returns a Forge Loader that uses the provided MetaCache for metadata caching and an HTTP client configured with a 2-minute timeout.
 func NewForgeLoader(cache *MetaCache) Loader {
 	return &forgeLoader{
 		cache:  cache,
@@ -309,7 +309,8 @@ func (f *forgeLoader) downloadToMemory(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// extractMCVersion extracts "1.20.1" from "1.20.1-47.3.0"
+// extractMCVersion extracts the Minecraft version prefix from a Maven-style version string.
+// For input like "1.20.1-47.3.0" it returns "1.20.1". If no '-' is present it returns an empty string.
 func extractMCVersion(mavenVersion string) string {
 	idx := strings.Index(mavenVersion, "-")
 	if idx < 0 {
@@ -318,7 +319,8 @@ func extractMCVersion(mavenVersion string) string {
 	return mavenVersion[:idx]
 }
 
-// extractForgeVersion extracts "47.3.0" from "1.20.1-47.3.0"
+// extractForgeVersion returns the substring after the first '-' in a Maven version string.
+// For example, "1.20.1-47.3.0" yields "47.3.0"; returns an empty string if no valid suffix exists.
 func extractForgeVersion(mavenVersion string) string {
 	idx := strings.Index(mavenVersion, "-")
 	if idx < 0 || idx+1 >= len(mavenVersion) {
@@ -327,7 +329,9 @@ func extractForgeVersion(mavenVersion string) string {
 	return mavenVersion[idx+1:]
 }
 
-// extractForgeInstaller reads version.json and install_profile.json from the installer JAR.
+// extractForgeInstaller extracts the `version.json` and `install_profile.json` files from a Forge installer JAR provided as a byte slice.
+// It returns the contents of `version.json` and, if present, `install_profile.json` (the latter may be nil).
+// An error is returned if the JAR cannot be opened, if `version.json` is missing, or if reading either file fails.
 func extractForgeInstaller(jarData []byte) (versionJSON []byte, installProfile []byte, err error) {
 	r, err := zip.NewReader(bytes.NewReader(jarData), int64(len(jarData)))
 	if err != nil {
@@ -366,7 +370,8 @@ func extractForgeInstaller(jarData []byte) (versionJSON []byte, installProfile [
 	return versionJSON, installProfile, nil
 }
 
-// collectForgeLibraries gathers libraries from both version.json and install_profile.json.
+// collectForgeLibraries parses the given version.json and (optionally) install_profile.json byte slices and returns the combined `libraries` arrays.
+// If `installProfile` is non-nil but fails to parse, its libraries are ignored. Returns an error only if `versionJSON` cannot be parsed.
 func collectForgeLibraries(versionJSON, installProfile []byte) ([]minecraft.Library, error) {
 	var version struct {
 		Libraries []minecraft.Library `json:"libraries"`
@@ -390,7 +395,13 @@ func collectForgeLibraries(versionJSON, installProfile []byte) ([]minecraft.Libr
 }
 
 // extractInstallerDataFiles extracts data/ entries from the installer JAR
-// into the libraries directory (Forge stores some artifacts this way).
+// extractInstallerDataFiles extracts files from the installer JAR's "maven/" entries
+// into the Minecraft libraries directory for the given mcDir.
+// It writes each non-directory entry under the JAR path prefixed with "maven/"
+// to the libraries directory, preserving the relative path. Entries that would
+// escape the libraries directory are ignored. Existing files are not overwritten.
+// Individual entry read/open errors are skipped; only failures creating parent
+// directories or writing files are returned as errors.
 func extractInstallerDataFiles(jarData []byte, mcDir string) error {
 	r, err := zip.NewReader(bytes.NewReader(jarData), int64(len(jarData)))
 	if err != nil {

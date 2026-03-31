@@ -14,6 +14,7 @@ type LoaderInstallManager struct {
 	installs map[string]*modloaders.CombinedInstall
 }
 
+// NewLoaderInstallManager creates a LoaderInstallManager with its installs map initialized and ready for use.
 func NewLoaderInstallManager() *LoaderInstallManager {
 	return &LoaderInstallManager{installs: make(map[string]*modloaders.CombinedInstall)}
 }

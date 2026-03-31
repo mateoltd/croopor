@@ -28,7 +28,7 @@ type Environment struct {
 }
 
 // DefaultEnvironment returns the environment for the current system,
-// with is_demo_user set to false (the core of the para-launcher).
+// "is_quick_play_realms": false.
 func DefaultEnvironment() Environment {
 	env := Environment{
 		OSName: currentOSName(),

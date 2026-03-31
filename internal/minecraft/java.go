@@ -128,7 +128,11 @@ func runtimeCacheDir() string {
 	return filepath.Join(home, ".croopor", "runtimes")
 }
 
-// downloadRuntime fetches a Java runtime from Mojang's servers.
+// downloadRuntime downloads the specified Java runtime component for the current OS/arch and installs its files under destDir.
+// It selects the component entry from Mojang's all-runtimes manifest, fetches the component manifest, and writes each listed file
+// into destDir (creating directories as needed). Files already present are skipped; directory entries are created; files marked
+// executable are made executable on non-Windows systems. Returns an error if the runtime is unavailable for the current OS/arch
+// or if fetching/parsing the manifests fails; individual file download or write failures are ignored and do not abort the operation.
 func downloadRuntime(component, destDir string) error {
 	osKey := runtimeOSArch()
 

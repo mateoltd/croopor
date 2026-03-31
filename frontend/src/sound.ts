@@ -241,6 +241,15 @@ export const Sound = {
   tick(): void { this.ui('click'); },
 };
 
+/**
+ * Determine which UI sound kind (if any) should be played for a given button element.
+ *
+ * Inspects the button's id and class list to map common UI controls to a SoundKind or
+ * to suppress sounds for elements that should not produce audio (e.g., theme or menu items).
+ *
+ * @param btn - The HTMLElement representing the button to inspect
+ * @returns The SoundKind to play for the button, or `null` if no sound should be played
+ */
 export function inferButtonSound(btn: HTMLElement): SoundKind | null {
   if (btn.classList.contains('version-item') || btn.classList.contains('theme-swatch') || btn.classList.contains('ob-theme-btn') || btn.classList.contains('ob-music-btn') || btn.classList.contains('settings-nav-btn')) return null;
   if (btn.id === 'music-btn') return null;
@@ -254,6 +263,12 @@ export function inferButtonSound(btn: HTMLElement): SoundKind | null {
   return 'click';
 }
 
+/**
+ * Installs a document-level click handler that plays a UI sound for clicked buttons.
+ *
+ * When a click lands on a button element (or a descendant of one) and the button is enabled,
+ * the handler infers an appropriate SoundKind via `inferButtonSound` and triggers `Sound.ui`.
+ */
 export function bindButtonSounds(): void {
   document.addEventListener('click', (e: MouseEvent) => {
     const btn = (e.target as Element | null)?.closest('button') as HTMLButtonElement | null;
@@ -263,6 +278,17 @@ export function bindButtonSounds(): void {
   });
 }
 
+/**
+ * Play a rate-limited slider sound for the specified family.
+ *
+ * Ensures sounds for each family are not played more frequently than a short threshold (55ms for
+ * "memory", 45ms for other families), clamps `value` to the range 0–1, and triggers the
+ * corresponding UI sound where "memory" uses the memory slider sound and other families use the
+ * general slider sound.
+ *
+ * @param value - Normalized intensity used to modulate the sound; values outside 0–1 are clamped.
+ * @param family - Slider family identifier; if `'memory'`, the memory slider sound is used, otherwise the general slider sound is used.
+ */
 export function playSliderSound(value: number, family: string): void {
   const now = performance.now();
   const limit = family === 'memory' ? 55 : 45;

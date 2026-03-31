@@ -14,6 +14,11 @@ import {
 } from './actions';
 import type { InstallItem, LoaderType } from './types';
 
+/**
+ * Initiates installation for the currently selected instance/version.
+ *
+ * Determines the installation target id in this priority order: `selectedVersion.needs_install`, `selectedVersion.id`, then the instance's `version_id`. If no instance is selected the function returns immediately. If the selected version `inherits_from` and the target parses as a loader composite, the install is routed to `installLoaderVersion` with the parsed loader details; otherwise the install is started via `installVersion`.
+ */
 export function handleInstallClick(): void {
   const inst = selectedInstance.value;
   if (!inst) return;
@@ -32,6 +37,11 @@ export function handleInstallClick(): void {
   installVersion(target);
 }
 
+/**
+ * Enqueue installation of the specified version and start processing the install queue if it is idle.
+ *
+ * @param target - The version id to install. If falsy or already actively installing the same version, no action is taken.
+ */
 export function installVersion(target: string): void {
   if (!target) return;
   const active = installState.value;
@@ -40,6 +50,12 @@ export function installVersion(target: string): void {
   if (installState.value.status === 'idle') processNextInstall();
 }
 
+/**
+ * Extracts the loader type and loader version from a composite version id.
+ *
+ * @param id - Composite version identifier to inspect for loader patterns
+ * @returns `{ type: LoaderType; loaderVersion: string }` when a known loader pattern (fabric, quilt, forge, neoforge) is found in `id`, `null` otherwise
+ */
 function parseLoaderFromId(id: string): { type: LoaderType; loaderVersion: string } | null {
   const lo = id.toLowerCase();
   let match: RegExpMatchArray | null;
@@ -61,6 +77,16 @@ function parseLoaderFromId(id: string): { type: LoaderType; loaderVersion: strin
   return null;
 }
 
+/**
+ * Enqueue a loader installation (game version + loader) and start processing the install queue if idle.
+ *
+ * No operation is performed if any argument is falsy or if the specified composite version is already the active install.
+ *
+ * @param loaderType - The loader type to install (for example: 'fabric', 'quilt', 'forge', 'neoforge')
+ * @param gameVersion - The target game version identifier the loader applies to
+ * @param loaderVersion - The loader's version string
+ * @param compositeVersionId - The composite version id representing the combined game+loader entry used for queueing and active-install checks
+ */
 export function installLoaderVersion(loaderType: LoaderType, gameVersion: string, loaderVersion: string, compositeVersionId: string): void {
   if (!loaderType || !gameVersion || !loaderVersion || !compositeVersionId) return;
   const active = installState.value;
@@ -72,6 +98,13 @@ export function installLoaderVersion(loaderType: LoaderType, gameVersion: string
   if (installState.value.status === 'idle') processNextInstall();
 }
 
+/**
+ * Begins processing the next queued install when the installer is idle.
+ *
+ * Dequeues the next install item and dispatches it to the loader install
+ * handler if it contains loader metadata, otherwise dispatches to the vanilla
+ * install handler. No-op if the installer is not idle or the queue is empty.
+ */
 function processNextInstall(): void {
   if (installState.value.status !== 'idle') return;
   const next = dequeueNextInstall();
@@ -80,6 +113,11 @@ function processNextInstall(): void {
   else processVanillaInstall(next);
 }
 
+/**
+ * Initiates a vanilla version install for the given queued item, connects progress events, and finalizes the install on error or completion.
+ *
+ * @param next - The queued install item whose `versionId` will be installed
+ */
 async function processVanillaInstall(next: InstallItem): Promise<void> {
   startInstall(next.versionId, 'Starting download...');
 
@@ -97,6 +135,13 @@ async function processVanillaInstall(next: InstallItem): Promise<void> {
   }
 }
 
+/**
+ * Processes a queued loader install item by initiating the loader installation and attaching progress events.
+ *
+ * @param next - The queued install item containing `versionId` and a `loader` object with installation metadata. If `next.loader` is absent, the function returns without action.
+ * 
+ * On failure, displays an error message and finalizes the install process.
+ */
 async function processLoaderInstall(next: InstallItem): Promise<void> {
   if (!next.loader) return;
 
@@ -115,6 +160,16 @@ async function processLoaderInstall(next: InstallItem): Promise<void> {
   }
 }
 
+/**
+ * Subscribes to backend vanilla-install progress events and updates the UI progress state until completion or error.
+ *
+ * Supports the native (Wails) event subscription when available, otherwise uses an SSE EventSource. Maps incoming
+ * event phases to progress percentages and human-readable labels, updates install progress (including an ETA),
+ * shows errors coming from the stream, and finalizes the install state when the install completes or the stream fails.
+ *
+ * @param installId - Backend install identifier returned by the server or loader starter
+ * @param versionId - ID of the game/version being installed (used to verify and finalize the active install)
+ */
 async function connectVanillaEvents(installId: string, versionId: string): Promise<void> {
   const startedAt = Date.now();
 
@@ -190,6 +245,16 @@ async function connectVanillaEvents(installId: string, versionId: string): Promi
   };
 }
 
+/**
+ * Subscribe to loader-install progress and error events for an install and update UI progress and completion state.
+ *
+ * Listens for loader-specific and subsequent vanilla-like phases, maps incoming phases to progress percentages and labels
+ * (augmented with an ETA), updates install progress, and finishes the install when the stream reports completion.
+ *
+ * @param installId - The remote install operation identifier used to subscribe to events
+ * @param versionId - The version id being installed; used to verify the active install before reporting errors
+ * @throws If running in the native runtime and the native event subscription is unavailable or starting native events fails
+ */
 async function connectLoaderEvents(installId: string, versionId: string): Promise<void> {
   const startedAt = Date.now();
   const onProgress = (data: any): void => {
@@ -277,6 +342,14 @@ async function connectLoaderEvents(installId: string, versionId: string): Promis
   setInstallEventSource(es);
 }
 
+/**
+ * Appends an estimated remaining-time suffix to a progress label for mid-range percentages.
+ *
+ * @param label - Base progress label to which an ETA may be appended
+ * @param pct - Progress percentage between 0 and 100
+ * @param startedAt - Timestamp in milliseconds when the operation started (Date.now())
+ * @returns The original `label` when `pct` is <= 5 or >= 100; otherwise `label` followed by ` — ~{N}s left` if under 60 seconds remaining or ` — ~{N}m left` when one minute or more remains
+ */
 function appendETA(label: string, pct: number, startedAt: number): string {
   if (pct <= 5 || pct >= 100) return label;
   const elapsed = (Date.now() - startedAt) / 1000;
@@ -285,6 +358,13 @@ function appendETA(label: string, pct: number, startedAt: number): string {
   return `${label} — ~${Math.ceil(remaining / 60)}m left`;
 }
 
+/**
+ * Finalizes the current install, refreshes version data, updates the catalog, and advances the install queue.
+ *
+ * Attempts to refresh the available versions from the API and writes them to the `versions` store. If a `catalog` exists,
+ * updates each catalog entry's `installed` flag according to the refreshed launchable versions. If the refresh fails,
+ * displays an error message indicating the install completed but the refresh failed. Finally, triggers processing of the next queued install.
+ */
 async function onInstallDone(): Promise<void> {
   completeInstall();
 

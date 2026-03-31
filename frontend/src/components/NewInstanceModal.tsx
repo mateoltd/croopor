@@ -34,6 +34,11 @@ const FILTER_CHIPS: { value: string; label: string }[] = [
   { value: 'old_alpha', label: 'Alpha' },
 ];
 
+/**
+ * Generate a default instance name that does not collide with existing instances.
+ *
+ * @returns `'Instance'` if that name is not already taken; otherwise `'Instance N'` where `N` is the smallest integer ≥ 2 that produces an unused name.
+ */
 function defaultName(): string {
   const base = 'Instance';
   const names = new Set(instances.value.map(i => i.name));
@@ -44,16 +49,36 @@ function defaultName(): string {
   }
 }
 
+/**
+ * Determines whether a given instance name is an auto-generated default.
+ *
+ * @param val - The instance name to check
+ * @returns `true` if `val` is empty or equals `"Instance"` or `"Instance <number>"`, `false` otherwise
+ */
 function isAutoName(val: string): boolean {
   return !val || /^Instance( \d+)?$/.test(val);
 }
 
+/**
+ * Validates an instance name.
+ *
+ * @param name - The candidate instance name to validate.
+ * @returns An error message describing the validation failure, or `null` if the name is valid
+ */
 function validateName(name: string): string | null {
   if (!name) return 'Name is required';
   if (instances.value.some(i => i.name === name)) return 'An instance with this name already exists';
   return null;
 }
 
+/**
+ * Build the version identifier used for instances when a mod loader is involved.
+ *
+ * @param loaderType - Loader key ('fabric', 'quilt', 'forge', 'neoforge') that selects the composition format
+ * @param mcVersion - The Minecraft version identifier (for example, "1.19.4")
+ * @param loaderVersion - The loader version identifier
+ * @returns The composite version id string; for unrecognized loader types returns the plain `mcVersion`
+ */
 function buildCompositeId(loaderType: string, mcVersion: string, loaderVersion: string): string {
   switch (loaderType) {
     case 'fabric': return `fabric-loader-${loaderVersion}-${mcVersion}`;
@@ -64,6 +89,13 @@ function buildCompositeId(loaderType: string, mcVersion: string, loaderVersion: 
   }
 }
 
+/**
+ * Render the "New Instance" modal UI that lets the user choose a Minecraft version, optionally enable a mod loader, configure a name, and create a new instance.
+ *
+ * This component is gated by the exported `showNewInstanceModal` signal and performs catalog loading, version filtering, loader lookup, validation, and instance creation with optional auto-installation when active.
+ *
+ * @returns A JSX element for the modal, or `null` when the modal is not shown.
+ */
 export function NewInstanceModal(): JSX.Element | null {
   if (!showNewInstanceModal.value) return null;
 

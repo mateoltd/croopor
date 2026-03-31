@@ -9,10 +9,22 @@ import { launchGame, killGame } from '../launch';
 import { handleInstallClick } from '../install';
 import { startRunningAnimation, stopRunningAnimation, startUptime, stopUptime } from '../effects';
 
+/**
+ * Resolve the effective version identifier to use for install and queue comparisons.
+ *
+ * @param inst - The instance object whose `version_id` is used as a fallback
+ * @param version - The selected version object or `null`; prefer `version.needs_install` when present
+ * @returns The version identifier: `version.needs_install` if present, otherwise `version.id`, otherwise `inst.version_id`
+ */
 function installTarget(inst: { version_id: string }, version: { needs_install?: string; id: string } | null): string {
   return version?.needs_install || version?.id || inst.version_id;
 }
 
+/**
+ * Render the action area for the currently selected instance, showing the appropriate UI for launching, running, installing, or queued states.
+ *
+ * @returns A JSX element representing the action area for the selected instance, or `null` if no instance is selected.
+ */
 export function ActionArea(): JSX.Element | null {
   const inst = selectedInstance.value;
   if (!inst) return null;
@@ -130,6 +142,18 @@ export function ActionArea(): JSX.Element | null {
   );
 }
 
+/**
+ * Renders the UI for a currently running game session.
+ *
+ * Registers an effect that starts a running animation and uptime tracking when mounted
+ * (using `launchedAt`) and stops them on unmount or when `launchedAt` changes.
+ *
+ * @param name - Display name of the running game
+ * @param versionId - Version identifier of the running instance
+ * @param pid - Process ID of the running game
+ * @param launchedAt - Launch timestamp used to initialize session uptime tracking
+ * @returns A JSX element displaying session info, uptime, and a STOP control that calls `killGame()`
+ */
 function RunningCard({ name, versionId, pid, launchedAt }: {
   name: string;
   versionId: string;

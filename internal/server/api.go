@@ -818,7 +818,8 @@ func dirModTime(path string) int64 {
 }
 
 // dirCount returns the number of entries in a directory.
-// Used as a fallback for filesystems where dir mtime doesn't update reliably.
+// dirCount reports the number of entries in the directory at path.
+// It returns -1 if the directory cannot be read.
 func dirCount(path string) int {
 	entries, err := os.ReadDir(path)
 	if err != nil {
@@ -837,6 +838,9 @@ var musicTracks = []struct {
 
 var musicHTTPClient = &http.Client{Timeout: 2 * time.Minute}
 
+// musicLocalPath returns the local cache path for the music track at the specified index
+// inside the configured music directory. It will panic if idx is out of range for the
+// package-level musicTracks slice.
 func musicLocalPath(idx int) string {
 	return filepath.Join(config.MusicDir(), musicTracks[idx].File)
 }
@@ -875,6 +879,10 @@ func (s *Server) handleMusicTrack(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, localPath)
 }
 
+// downloadMusicFile downloads the resource at remoteURL and atomically saves it to localPath,
+// creating parent directories as needed.
+// It returns an error if the HTTP request fails, the response status is not 200 OK,
+// or if writing/renaming the temporary file to localPath fails.
 func downloadMusicFile(localPath, remoteURL string) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
 		return fmt.Errorf("create directory: %w", err)

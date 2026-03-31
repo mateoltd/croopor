@@ -46,6 +46,14 @@ export const Shortcuts = {
   },
 };
 
+/**
+ * Update elements' shortcut hint attributes to reflect the current shortcut bindings.
+ *
+ * Scans the document for elements with a `data-action` attribute and sets each element's
+ * `data-shortcut-hint` to the formatted shortcut label for that action. If an action has
+ * no formatted label or the `data-action` is missing, the `data-shortcut-hint` attribute
+ * is removed.
+ */
 export function syncShortcutHints(): void {
   document.querySelectorAll('[data-action]').forEach(el => {
     const action = (el as HTMLElement).dataset.action;
@@ -59,14 +67,30 @@ export function syncShortcutHints(): void {
   });
 }
 
+/**
+ * Begin recording a keyboard shortcut for the specified action.
+ *
+ * @param action - The action identifier whose shortcut should be captured
+ */
 export function startRecording(action: string): void {
   recordingShortcut.value = action;
 }
 
+/**
+ * Exit shortcut recording mode and clear the currently recording action.
+ */
 export function stopRecording(): void {
   recordingShortcut.value = null;
 }
 
+/**
+ * Reset a custom keyboard shortcut for the given action to its default and update persisted and UI state.
+ *
+ * Removes any custom binding for `action`, persists the updated custom shortcuts to local state, refreshes
+ * shortcut hint attributes in the DOM, stops any active shortcut recording, and plays a soft UI confirmation sound.
+ *
+ * @param action - The action key whose custom shortcut will be removed
+ */
 export function resetShortcut(action: string): void {
   Shortcuts.reset(action);
   local.shortcuts = { ...Shortcuts._custom };
@@ -76,6 +100,14 @@ export function resetShortcut(action: string): void {
   Sound.ui('soft');
 }
 
+/**
+ * Handle a keyboard event while a shortcut is being recorded and, when appropriate, capture and persist a new binding for the current action.
+ *
+ * If no action is being recorded this returns `false`. While recording, `Escape` cancels recording and returns `true`; pressing a single modifier key keeps recording and returns `true`. Any other key creates or updates the action's shortcut (including modifier flags), persists the custom shortcuts, updates UI hints, stops recording, and plays a confirmation sound.
+ *
+ * @param e - The keyboard event to process (typically from a keydown listener)
+ * @returns `true` if the event was handled (recording was active), `false` otherwise.
+ */
 export function handleRecordKey(e: KeyboardEvent): boolean {
   const action = recordingShortcut.value;
   if (!action) return false;

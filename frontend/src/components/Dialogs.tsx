@@ -20,6 +20,17 @@ interface PromptOptions {
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+/**
+ * Keep keyboard focus trapped inside the given dialog when the Tab key is pressed.
+ *
+ * If Tab is pressed, this constrains cycling of focus to the dialog's focusable descendants:
+ * - If no focusable elements are found, prevents the default Tab behavior.
+ * - If Shift+Tab is pressed on the first focusable element, moves focus to the last.
+ * - If Tab is pressed on the last focusable element, moves focus to the first.
+ *
+ * @param dialog - The dialog container element to confine focus within.
+ * @param e - The keyboard event from a keydown handler.
+ */
 function trapDialogFocus(dialog: HTMLElement, e: KeyboardEvent): void {
   if (e.key !== 'Tab') return;
   const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
@@ -41,7 +52,17 @@ function trapDialogFocus(dialog: HTMLElement, e: KeyboardEvent): void {
   }
 }
 
-// ── Confirm dialog component ──
+/**
+ * Render a confirm modal dialog that prompts the user with a message and confirm/cancel actions.
+ *
+ * @param message - The message text displayed inside the dialog (supports newlines).
+ * @param options - Dialog button labels and styling:
+ *   - `confirmText`: label for the confirm button
+ *   - `cancelText`: label for the cancel button
+ *   - `destructive`: when true, applies destructive styling to the confirm button
+ * @param onResult - Callback invoked with `true` when the user confirms, or `false` when the user cancels or dismisses the dialog
+ * @returns The rendered JSX element for the confirm dialog
+ */
 
 function ConfirmDialog({ message, options, onResult }: {
   message: string;
@@ -92,7 +113,22 @@ function ConfirmDialog({ message, options, onResult }: {
   );
 }
 
-// ── Prompt dialog component ──
+/**
+ * Renders a modal prompt dialog that collects a trimmed text value and reports the result via callback.
+ *
+ * The dialog autofocuses and selects the input on mount. Confirming with the confirm button or Enter will trim the input and:
+ * - if the trimmed value is empty, the dialog remains open and the input is refocused;
+ * - if `options.validate` is provided and returns a non-null string, that string is shown as an inline error and the input is refocused;
+ * - otherwise `onResult` is called with the trimmed string.
+ *
+ * Cancellation (cancel button, overlay/background click, or Escape) calls `onResult(null)`.
+ *
+ * @param message - The prompt message displayed above the input
+ * @param defaultValue - The input's initial value
+ * @param options - Dialog text and optional validation: `confirmText`, `cancelText`, and optional `validate(val)` returning an error string or `null`
+ * @param onResult - Callback invoked with the trimmed input string on confirm, or `null` on cancel
+ * @returns A JSX element rendering the prompt dialog
+ */
 
 function PromptDialog({ message, defaultValue, options, onResult }: {
   message: string;
@@ -110,6 +146,11 @@ function PromptDialog({ message, defaultValue, options, onResult }: {
     if (el) { el.focus(); el.select(); }
   }, []);
 
+  /**
+   * Attempt to confirm the current prompt value and close the dialog if valid.
+   *
+   * Trims the input value; if the trimmed value is empty, refocuses the input and aborts. If a `validate` function is provided and returns an error string, sets `error` to that string, refocuses the input, and aborts. If validation passes (or is not provided), calls `onResult` with the trimmed string.
+   */
   function tryConfirm(): void {
     const val = inputValue.value.trim();
     if (!val) { inputRef.current?.focus(); return; }
@@ -176,7 +217,12 @@ function PromptDialog({ message, defaultValue, options, onResult }: {
   );
 }
 
-// ── Imperative API ──
+/**
+ * Appends the provided container to document.body, renders the given Preact node into it, and triggers a soft UI sound.
+ *
+ * @param container - The div element to append to the document body and use as the render root
+ * @param node - The Preact element to render into the container
+ */
 
 function mountDialog(container: HTMLDivElement, node: JSX.Element): void {
   document.body.appendChild(container);
@@ -184,6 +230,11 @@ function mountDialog(container: HTMLDivElement, node: JSX.Element): void {
   Sound.ui('soft');
 }
 
+/**
+ * Removes a mounted dialog and its container from the document.
+ *
+ * @param container - The div that served as the dialog's mount point; this element will be unmounted and removed from the DOM
+ */
 function unmountDialog(container: HTMLDivElement): void {
   render(null, container);
   container.remove();
@@ -191,10 +242,25 @@ function unmountDialog(container: HTMLDivElement): void {
 
 let dismissActiveDialog: (() => void) | null = null;
 
+/**
+ * Dismisses the currently active dialog, if one is present.
+ *
+ * Invokes the active dialog's cancel/dismiss handler so the dialog closes.
+ */
 export function dismissDialog(): void {
   dismissActiveDialog?.();
 }
 
+/**
+ * Displays a modal confirmation dialog with the given message and awaits the user's choice.
+ *
+ * The function dismisses any previously active dialog before showing the new one and mounts a temporary
+ * DOM container for the dialog until it is closed.
+ *
+ * @param message - The message to show inside the confirmation dialog
+ * @param options - Optional configuration: `confirmText`, `cancelText`, and `destructive` to style the confirm action
+ * @returns `true` if the user confirmed, `false` otherwise
+ */
 export function showConfirm(message: string, options: ConfirmOptions = {}): Promise<boolean> {
   const { confirmText = 'Confirm', cancelText = 'Cancel', destructive = false } = options;
   return new Promise(resolve => {
@@ -217,6 +283,17 @@ export function showConfirm(message: string, options: ConfirmOptions = {}): Prom
   });
 }
 
+/**
+ * Displays a modal prompt requesting text input from the user.
+ *
+ * @param message - The prompt message shown to the user
+ * @param defaultValue - Initial value populated into the text input
+ * @param options - Configuration for the prompt (confirm/cancel labels and optional validator)
+ * @param options.confirmText - Text for the confirm button (defaults to "OK")
+ * @param options.cancelText - Text for the cancel button (defaults to "Cancel")
+ * @param options.validate - Optional validator that returns an error string to block confirmation; if it returns a string, the prompt remains open and the error is shown
+ * @returns The trimmed string entered by the user, or `null` if the prompt was canceled
+ */
 export function showPrompt(message: string, defaultValue = '', options: PromptOptions = {}): Promise<string | null> {
   const { confirmText = 'OK', cancelText = 'Cancel', validate } = options;
   return new Promise(resolve => {

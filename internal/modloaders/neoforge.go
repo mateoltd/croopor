@@ -254,7 +254,11 @@ func (n *neoforgeLoader) downloadToMemory(url string) ([]byte, error) {
 }
 
 // neoforgeToMCVersion maps a NeoForge version to its Minecraft version.
-// E.g. "20.4.237" -> "1.20.4", "21.0.1" -> "1.21", "21.4.1" -> "1.21.4"
+// neoforgeToMCVersion converts a NeoForge Maven version string to the corresponding
+// Minecraft version string. If the input lacks a major or minor segment the empty
+// string is returned. When the minor segment equals "0" the result is "1.<major>";
+// otherwise the result is "1.<major>.<minor>".
+// Examples: "20.4.237" -> "1.20.4", "21.0.1" -> "1.21".
 func neoforgeToMCVersion(neoVersion string) string {
 	parts := strings.SplitN(neoVersion, ".", 3)
 	if len(parts) < 2 {
@@ -269,7 +273,9 @@ func neoforgeToMCVersion(neoVersion string) string {
 	return "1." + major + "." + minor
 }
 
-// extractNeoForgeInstaller reads version.json and install_profile.json from the installer.
+// extractNeoForgeInstaller extracts `version.json` and `install_profile.json` from a NeoForge installer JAR.
+// It returns the raw contents of `version.json` and `install_profile.json` (the latter may be nil if absent).
+// If `version.json` is not present in the JAR or an I/O error occurs while reading entries, a non-nil error is returned.
 func extractNeoForgeInstaller(jarData []byte) (versionJSON []byte, installProfile []byte, err error) {
 	r, err := zip.NewReader(bytes.NewReader(jarData), int64(len(jarData)))
 	if err != nil {

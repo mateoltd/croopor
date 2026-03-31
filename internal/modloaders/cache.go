@@ -19,7 +19,9 @@ type MetaCache struct {
 	ttl     time.Duration
 }
 
-// NewMetaCache creates a cache with the given time-to-live.
+// NewMetaCache creates and returns a thread-safe in-memory metadata cache that uses the
+// provided TTL to determine whether stored entries are fresh. The returned MetaCache is
+// ready for use with string-keyed entries that hold arbitrary data.
 func NewMetaCache(ttl time.Duration) *MetaCache {
 	return &MetaCache{
 		entries: make(map[string]cacheEntry),
