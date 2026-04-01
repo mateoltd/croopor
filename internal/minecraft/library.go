@@ -112,7 +112,19 @@ func resolveLegacyNatives(lib Library, libDir string, env Environment) []Resolve
 				IsNative: true,
 				Name:     lib.Name + ":" + classifierKey,
 			})
+			return results
 		}
+	}
+
+	// Maven-coordinate fallback for old versions that omit downloads entirely.
+	mavenPath := MavenToPath(lib.Name + ":" + classifierKey)
+	if mavenPath != "" {
+		absPath := filepath.Join(libDir, mavenPath)
+		results = append(results, ResolvedLibrary{
+			AbsPath:  absPath,
+			IsNative: true,
+			Name:     lib.Name + ":" + classifierKey,
+		})
 	}
 
 	return results
