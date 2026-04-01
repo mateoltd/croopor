@@ -297,6 +297,12 @@ func FilterLibraries(libs []Library, env Environment) []Library {
 func ResolveLibDownload(lib Library, mcDir string) (path, url, sha1 string) {
 	libDir := LibrariesDir(mcDir)
 
+	// Native-only libraries (e.g. lwjgl-platform in old versions) have no main
+	// artifact. They only ship classifier JARs resolved by resolveNativeDownload.
+	if lib.Natives != nil && (lib.Downloads == nil || lib.Downloads.Artifact == nil) {
+		return "", "", ""
+	}
+
 	if lib.Downloads != nil && lib.Downloads.Artifact != nil {
 		a := lib.Downloads.Artifact
 		if resolved, ok := resolvePathUnderRoot(libDir, a.Path); ok {

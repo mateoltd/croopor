@@ -31,7 +31,7 @@ func ResolveLibraries(v *VersionJSON, mcDir string, env Environment) ([]Resolved
 			nativeLibs := resolveLegacyNatives(lib, libDir, env)
 			resolved = append(resolved, nativeLibs...)
 			// If this library ONLY provides natives (no artifact), skip artifact resolution
-			if lib.Downloads != nil && lib.Downloads.Artifact == nil {
+			if lib.Downloads == nil || lib.Downloads.Artifact == nil {
 				continue
 			}
 		}
