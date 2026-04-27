@@ -67,6 +67,10 @@ async fn handle_get_instance(
 struct CreateInstanceRequest {
     name: String,
     version_id: String,
+    #[serde(default)]
+    icon: String,
+    #[serde(default)]
+    accent: String,
 }
 
 async fn handle_create_instance(
@@ -76,7 +80,13 @@ async fn handle_create_instance(
     let mc_dir = state.library_dir().map(PathBuf::from);
     state
         .instances()
-        .add(payload.name, payload.version_id, mc_dir.as_deref())
+        .add(
+            payload.name,
+            payload.version_id,
+            payload.icon,
+            payload.accent,
+            mc_dir.as_deref(),
+        )
         .map(Json)
         .map_err(|error| {
             let status = if error.to_string().contains("already exists") {
@@ -95,6 +105,7 @@ async fn handle_create_instance(
 struct InstancePatch {
     name: Option<String>,
     version_id: Option<String>,
+    art_seed: Option<u32>,
     max_memory_mb: Option<i32>,
     min_memory_mb: Option<i32>,
     java_path: Option<String>,
@@ -103,6 +114,8 @@ struct InstancePatch {
     jvm_preset: Option<String>,
     performance_mode: Option<String>,
     extra_jvm_args: Option<String>,
+    icon: Option<String>,
+    accent: Option<String>,
 }
 
 async fn handle_update_instance(
@@ -122,6 +135,9 @@ async fn handle_update_instance(
     }
     if let Some(version_id) = patch.version_id.filter(|value| !value.trim().is_empty()) {
         instance.version_id = version_id;
+    }
+    if let Some(art_seed) = patch.art_seed.filter(|value| *value > 0) {
+        instance.art_seed = art_seed;
     }
     if let Some(max_memory_mb) = patch.max_memory_mb {
         instance.max_memory_mb = max_memory_mb.max(0);
@@ -146,6 +162,15 @@ async fn handle_update_instance(
     }
     if let Some(extra_jvm_args) = patch.extra_jvm_args {
         instance.extra_jvm_args = extra_jvm_args;
+    }
+    if let Some(icon) = patch.icon {
+        instance.icon = icon;
+    }
+    if let Some(accent) = patch.accent {
+        instance.accent = accent;
+    }
+    if instance.art_seed > 0 {
+        instance.art_preset = croopor_config::art_preset_for_seed(instance.art_seed).to_string();
     }
 
     state

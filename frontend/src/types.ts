@@ -6,6 +6,8 @@ export interface Instance {
   version_id: string;
   created_at: string;
   last_played_at?: string;
+  art_seed?: number;
+  art_preset?: string;
   max_memory_mb?: number;
   min_memory_mb?: number;
   java_path?: string;
@@ -14,6 +16,8 @@ export interface Instance {
   jvm_preset?: string;
   performance_mode?: string;
   extra_jvm_args?: string;
+  icon?: string;
+  accent?: string;
 }
 
 export interface EnrichedInstance extends Instance {
@@ -340,6 +344,7 @@ export interface LocalPrefs {
   customHue: number;
   customVibrancy: number;
   lightness: number;
+  sidebarCompact: boolean;
   logHeight: number;
   collapsedGroups: Record<string, boolean>;
   sidebarFilter: string;
