@@ -2,17 +2,17 @@ use crate::java::ensure_java_runtime;
 use crate::launch::{Library, VersionJson, maven_to_path};
 use crate::manifest::fetch_version_manifest;
 use crate::paths::{assets_dir, libraries_dir, versions_dir};
+use crate::resource::DownloadResourcePolicy;
 use crate::rules::{current_os_arch, default_environment, evaluate_rules};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-
-const LIBRARY_DOWNLOAD_CONCURRENCY: usize = 4;
-const ASSET_DOWNLOAD_CONCURRENCY: usize = 8;
+use tokio::sync::Semaphore;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadProgress {
@@ -29,6 +29,8 @@ pub struct DownloadProgress {
 pub struct Downloader {
     mc_dir: PathBuf,
     client: reqwest::Client,
+    resource_policy: DownloadResourcePolicy,
+    disk_write_limiter: Arc<Semaphore>,
 }
 
 #[derive(Debug, Error)]
@@ -54,9 +56,12 @@ struct DownloadJob {
 
 impl Downloader {
     pub fn new(mc_dir: impl Into<PathBuf>) -> Self {
+        let resource_policy = DownloadResourcePolicy::detect();
         Self {
             mc_dir: mc_dir.into(),
             client: build_http_client(Duration::from_secs(300)),
+            resource_policy,
+            disk_write_limiter: Arc::new(Semaphore::new(resource_policy.disk_write_concurrency)),
         }
     }
 
@@ -185,14 +190,16 @@ impl Downloader {
         let mut library_downloads =
             futures_util::stream::iter(library_jobs.into_iter().map(|job| {
                 let client = client.clone();
+                let disk_write_limiter = self.disk_write_limiter.clone();
                 async move {
                     if !job.path.is_file() {
-                        download_file_with_client(&client, &job.url, &job.path).await?;
+                        download_file_with_client(&client, &job.url, &job.path, disk_write_limiter)
+                            .await?;
                     }
                     Ok::<String, DownloadError>(job.name)
                 }
             }))
-            .buffer_unordered(LIBRARY_DOWNLOAD_CONCURRENCY);
+            .buffer_unordered(self.resource_policy.library_network_concurrency);
         while let Some(result) = library_downloads.next().await {
             let name = result?;
             completed_library_jobs += 1;
@@ -235,9 +242,16 @@ impl Downloader {
                 self.download_file(&logging.file.url, &log_config_path)
                     .await?;
             }
+            send(progress("log_config", 1, 1, Some(logging.file.id.clone())));
         }
 
         if let Some(task) = runtime_task {
+            send(progress(
+                "java_runtime",
+                0,
+                1,
+                Some("Finishing Java runtime...".to_string()),
+            ));
             let java_version = task
                 .await
                 .map_err(|error| DownloadError::PrepareRuntime(error.to_string()))?
@@ -317,21 +331,23 @@ impl Downloader {
 
         send(progress("assets", 0, jobs.len() as i32, None));
         let client = self.client.clone();
+        let disk_write_limiter = self.disk_write_limiter.clone();
         let total_jobs = jobs.len() as i32;
         let mut completed_jobs = 0;
         let mut asset_downloads =
             futures_util::stream::iter(jobs.into_iter().map(|(hash, path)| {
                 let client = client.clone();
+                let disk_write_limiter = disk_write_limiter.clone();
                 async move {
                     let url = format!(
                         "https://resources.download.minecraft.net/{}/{}",
                         &hash[..2],
                         hash
                     );
-                    download_file_with_client(&client, &url, &path).await
+                    download_file_with_client(&client, &url, &path, disk_write_limiter).await
                 }
             }))
-            .buffer_unordered(ASSET_DOWNLOAD_CONCURRENCY);
+            .buffer_unordered(self.resource_policy.asset_network_concurrency);
         while let Some(result) = asset_downloads.next().await {
             result?;
             completed_jobs += 1;
@@ -369,6 +385,14 @@ impl Downloader {
         for attempt in 0..3 {
             let result = async {
                 let response = self.client.get(url).send().await?.error_for_status()?;
+                let _disk_permit = self
+                    .disk_write_limiter
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| {
+                        DownloadError::ResolveManifest("download resources unavailable".to_string())
+                    })?;
                 let mut output = fs::File::create(&tmp_path)?;
                 let mut stream = response.bytes_stream();
                 while let Some(chunk) = stream.next().await {
@@ -408,6 +432,8 @@ where
     F: FnMut(DownloadProgress),
 {
     let client = build_http_client(Duration::from_secs(300));
+    let resource_policy = DownloadResourcePolicy::detect();
+    let disk_write_limiter = Arc::new(Semaphore::new(resource_policy.disk_write_concurrency));
     let env = default_environment();
     let jobs = library_jobs_for(mc_dir, libraries, &env);
 
@@ -416,14 +442,15 @@ where
     let mut completed_jobs = 0;
     let mut downloads = futures_util::stream::iter(jobs.into_iter().map(|job| {
         let client = client.clone();
+        let disk_write_limiter = disk_write_limiter.clone();
         async move {
             if !job.path.is_file() {
-                download_file_with_client(&client, &job.url, &job.path).await?;
+                download_file_with_client(&client, &job.url, &job.path, disk_write_limiter).await?;
             }
             Ok::<String, DownloadError>(job.name)
         }
     }))
-    .buffer_unordered(LIBRARY_DOWNLOAD_CONCURRENCY);
+    .buffer_unordered(resource_policy.library_network_concurrency);
     while let Some(result) = downloads.next().await {
         let name = result?;
         completed_jobs += 1;
@@ -653,6 +680,7 @@ async fn download_file_with_client(
     client: &reqwest::Client,
     url: &str,
     destination: &Path,
+    disk_write_limiter: Arc<Semaphore>,
 ) -> Result<(), DownloadError> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
@@ -663,6 +691,13 @@ async fn download_file_with_client(
     for attempt in 0..3 {
         let result = async {
             let response = client.get(url).send().await?.error_for_status()?;
+            let _disk_permit = disk_write_limiter
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| {
+                    DownloadError::ResolveManifest("download resources unavailable".to_string())
+                })?;
             let mut output = fs::File::create(&tmp_path)?;
             let mut stream = response.bytes_stream();
             while let Some(chunk) = stream.next().await {

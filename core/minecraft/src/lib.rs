@@ -7,6 +7,7 @@ pub mod loaders;
 pub mod manifest;
 pub mod paths;
 pub mod profiles;
+pub mod resource;
 pub mod rules;
 pub mod runtime;
 pub mod types;

@@ -157,11 +157,20 @@ flowchart TD
 flowchart TD
     A[frontend install.ts queues install] --> B[POST /api/v1/install]
     B --> C[apps/api install route creates install session]
-    C --> D[core/minecraft resolves downloads and loader strategy]
-    D --> E[progress events emitted over SSE or Tauri]
-    E --> F[frontend updates progress UI]
-    F --> G[frontend refreshes versions/catalog/instance state]
+    C --> D[core/minecraft detects download resource policy]
+    D --> E[core/minecraft resolves downloads and loader strategy]
+    E --> F[network downloads use policy concurrency]
+    F --> G[disk writes use a separate AV-friendly budget]
+    G --> H[progress events emitted over SSE or Tauri]
+    H --> I[frontend updates progress UI]
+    I --> J[frontend refreshes versions/catalog/instance state]
 ```
+
+`core/minecraft/src/resource.rs` owns install download resource policy. It detects logical CPU count and memory, chooses a low-end, mid-range, or high-end baseline, and then applies `CROOPOR_DOWNLOAD_MODE` when present:
+
+- `saver`, `balanced`, `performance`, `maximum`
+
+Network fan-out and disk write fan-out are separate. This keeps antivirus and slow disks from being flooded while still allowing high-end systems to raise network concurrency. Advanced overrides are available through `CROOPOR_DOWNLOAD_LIBRARY_CONCURRENCY`, `CROOPOR_DOWNLOAD_ASSET_CONCURRENCY`, `CROOPOR_DOWNLOAD_RUNTIME_CONCURRENCY`, and `CROOPOR_DOWNLOAD_DISK_CONCURRENCY`.
 
 ### Version and lifecycle pipeline
 ```mermaid

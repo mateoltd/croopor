@@ -1,14 +1,15 @@
 use crate::launch::JavaVersion;
 use crate::paths::runtime_dirs;
+use crate::resource::DownloadResourcePolicy;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 const RUNTIME_MANIFEST_URL: &str = "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
 
@@ -545,6 +546,7 @@ async fn install_managed_runtime(
 
     let component_manifest = fetch_runtime_json::<ComponentManifest>(manifest_url).await?;
 
+    let mut downloads = Vec::new();
     for (relative_path, file) in component_manifest.files {
         let destination = temp_dir.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR));
         if file.kind == "directory" {
@@ -559,29 +561,13 @@ async fn install_managed_runtime(
             continue;
         };
 
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        }
-
-        let bytes = fetch_runtime_bytes(&raw.url).await?;
-        let temp_path = destination.with_extension("tmp");
-        fs::write(&temp_path, &bytes)
-            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        fs::rename(&temp_path, &destination)
-            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        #[cfg(unix)]
-        if file.executable {
-            use std::os::unix::fs::PermissionsExt;
-
-            let metadata = fs::metadata(&destination)
-                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-            let mut permissions = metadata.permissions();
-            permissions.set_mode(0o755);
-            fs::set_permissions(&destination, permissions)
-                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        }
+        downloads.push(RuntimeDownloadJob {
+            destination,
+            url: raw.url,
+            executable: file.executable,
+        });
     }
+    download_runtime_files(downloads).await?;
 
     let java_exe = java_executable(&temp_dir);
     if !runtime_executable_ready(&java_exe) {
@@ -605,42 +591,133 @@ async fn fetch_runtime_json<T>(url: &str) -> Result<T, JavaRuntimeLookupError>
 where
     T: serde::de::DeserializeOwned + Send + 'static,
 {
-    let url = url.to_string();
+    runtime_http_client(std::time::Duration::from_secs(30))
+        .get(url)
+        .send()
+        .await
+        .map_err(runtime_request_error)?
+        .error_for_status()
+        .map_err(runtime_request_error)?
+        .json::<T>()
+        .await
+        .map_err(runtime_request_error)
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeDownloadJob {
+    destination: PathBuf,
+    url: String,
+    executable: bool,
+}
+
+async fn download_runtime_files(
+    jobs: Vec<RuntimeDownloadJob>,
+) -> Result<(), JavaRuntimeLookupError> {
+    let resource_policy = DownloadResourcePolicy::detect();
+    let client = runtime_http_client(std::time::Duration::from_secs(300));
+    let disk_write_limiter = Arc::new(Semaphore::new(resource_policy.disk_write_concurrency));
+    let mut downloads = futures_util::stream::iter(jobs.into_iter().map(|job| {
+        let client = client.clone();
+        let disk_write_limiter = disk_write_limiter.clone();
+        async move { download_runtime_file(&client, job, disk_write_limiter).await }
+    }))
+    .buffer_unordered(resource_policy.runtime_network_concurrency);
+
+    while let Some(result) = downloads.next().await {
+        result?;
+    }
+    Ok(())
+}
+
+async fn download_runtime_file(
+    client: &reqwest::Client,
+    job: RuntimeDownloadJob,
+    disk_write_limiter: Arc<Semaphore>,
+) -> Result<(), JavaRuntimeLookupError> {
+    let mut last_error: Option<JavaRuntimeLookupError> = None;
+    for attempt in 0..3 {
+        let result = download_runtime_file_once(client, &job, disk_write_limiter.clone()).await;
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = Some(error);
+                let _ = fs::remove_file(job.destination.with_extension("tmp"));
+                if attempt < 2 {
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        250 * (attempt + 1) as u64,
+                    ))
+                    .await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        JavaRuntimeLookupError::Download(format!("download failed for {}", job.url))
+    }))
+}
+
+async fn download_runtime_file_once(
+    client: &reqwest::Client,
+    job: &RuntimeDownloadJob,
+    disk_write_limiter: Arc<Semaphore>,
+) -> Result<(), JavaRuntimeLookupError> {
+    let bytes = client
+        .get(&job.url)
+        .send()
+        .await
+        .map_err(runtime_request_error)?
+        .error_for_status()
+        .map_err(runtime_request_error)?
+        .bytes()
+        .await
+        .map_err(runtime_request_error)?;
+    let destination = job.destination.clone();
+    let executable = job.executable;
+
+    let disk_permit = disk_write_limiter.acquire_owned().await.map_err(|_| {
+        JavaRuntimeLookupError::Download("download resources unavailable".to_string())
+    })?;
     tokio::task::spawn_blocking(move || {
-        let response = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent("croopor/0.3")
-            .build()
-            .get(&url)
-            .call()
+        let _disk_permit = disk_permit;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
+        }
+
+        let temp_path = destination.with_extension("tmp");
+        fs::write(&temp_path, &bytes)
             .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        response
-            .into_json::<T>()
-            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))
+        fs::rename(&temp_path, &destination)
+            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
+
+        #[cfg(unix)]
+        if executable {
+            use std::os::unix::fs::PermissionsExt;
+
+            let metadata = fs::metadata(&destination)
+                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
+            let mut permissions = metadata.permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&destination, permissions)
+                .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
+        }
+
+        Ok(())
     })
     .await
     .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?
 }
 
-async fn fetch_runtime_bytes(url: &str) -> Result<Vec<u8>, JavaRuntimeLookupError> {
-    let url = url.to_string();
-    tokio::task::spawn_blocking(move || {
-        let response = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(300))
-            .user_agent("croopor/0.3")
-            .build()
-            .get(&url)
-            .call()
-            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        let mut reader = response.into_reader();
-        let mut bytes = Vec::new();
-        reader
-            .read_to_end(&mut bytes)
-            .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?;
-        Ok(bytes)
-    })
-    .await
-    .map_err(|error| JavaRuntimeLookupError::Download(error.to_string()))?
+fn runtime_http_client(timeout: std::time::Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .user_agent("croopor/0.3")
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+fn runtime_request_error(error: reqwest::Error) -> JavaRuntimeLookupError {
+    JavaRuntimeLookupError::Download(error.to_string())
 }
 
 fn runtime_cache_dir() -> PathBuf {
