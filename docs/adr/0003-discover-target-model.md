@@ -86,5 +86,6 @@ Tradeoffs:
 - Compatibility ranking is a heuristic over upstream metadata. It scores
   (loader, version) pairs and reports what each drops; it cannot know that two mods
   are semantically incompatible if neither declares it.
-- Modpack import writes many files into an instance in one non-transactional pass.
-  A failure part way leaves a partly populated instance rather than rolling back.
+- Modpack import stages every selected file and override before promotion. Replaced
+  files are backed up until the complete file set and provenance manifest commit;
+  setup-owned instances are removed if their queued import fails.

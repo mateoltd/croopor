@@ -64,10 +64,10 @@ Supporting choices:
 Scope for the first release:
 - Data packs are deferred. Vanilla data packs are per-world, which does not fit
   "install into instance" cleanly; they come in a later phase.
-- Phase 1 ships the Discover page, Modrinth mods install into an existing instance,
-  provenance with retrofit of existing jars, dependency resolution, basic conflict
-  detection, and queue-integrated progress. Later phases add resource/shader packs
-  and update detection, then modpacks and cherry-pick, then a second provider.
+- Discover ships with Modrinth mods, resource packs, shaders, full modpack setup,
+  compatible-file cherry-pick, provenance with retrofit, dependency and conflict
+  resolution, update detection, and queue-integrated progress. A second provider
+  remains deferred until a suitable independent source exists.
 
 ## Consequences
 Positive:
@@ -82,5 +82,5 @@ Tradeoffs:
   drift handling and retrofit add code the opaque-folder model did not need.
 - Single-provider reality means cross-provider canonicalization is unexercised
   until a second source exists, so that path stays best-effort.
-- Modpack install and cherry-pick add real complexity and are intentionally staged
-  into later phases rather than shipped at once.
+- Cherry-pick fails closed for files the provider cannot identify, because Axial
+  cannot promise provenance, updates, compatibility, or managed removal for them.
