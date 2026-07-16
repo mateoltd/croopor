@@ -38,18 +38,20 @@ not a rewrite.
 
 3. Hash-based canonicalization for dedupe.
 A file's `sha512` is its universal identity. Identical files across providers and
-manually dropped jars collapse to one canonical file, and Modrinth's
-`version_file/{hash}` endpoint resolves any local jar back to a project and
-version. Project-level cross-provider merging (by project id, then shared source
-URL) is best-effort and strengthened later; nothing in Phase 1 depends on it.
+managed pack contents collapse to one canonical file, and Modrinth's
+`version_file/{hash}` endpoint resolves provider-described pack files back to a
+project and version. Project-level cross-provider merging (by project id, then
+shared source URL) is best-effort and strengthened later; nothing in Phase 1
+depends on it.
 
 4. Per-instance provenance manifest.
-Each instance gains an `axial.content.json` manifest, owned by `core/config`,
-recording every managed entry (canonical id, provider, project/version ids, kind,
-filename, sha512, size, dependencies, enabled, source, installed_at). The
-filesystem stays the truth for file presence; the manifest is the identity overlay
-reconciled by hash. Existing unmanaged jars are hashed and identified on open so
-current instances gain provenance automatically.
+Each instance gains an `axial.content.json` manifest, owned by `core/content`,
+recording every launcher-managed entry (canonical id, provider, project/version
+ids, kind, filename, hashes, size, dependencies, enabled state, and install
+time). The filesystem stays the truth for current file presence, while the
+manifest remains the durable identity and ownership record. Reading instance
+content never rewrites provenance or adopts files that appeared outside a
+launcher-owned install transaction.
 
 Supporting choices:
 - Content installs are a new kind on the existing install queue, reusing verified
@@ -65,7 +67,7 @@ Scope for the first release:
 - Data packs are deferred. Vanilla data packs are per-world, which does not fit
   "install into instance" cleanly; they come in a later phase.
 - Discover ships with Modrinth mods, resource packs, shaders, full modpack setup,
-  compatible-file cherry-pick, provenance with retrofit, dependency and conflict
+  compatible-file cherry-pick, managed provenance, dependency and conflict
   resolution, update detection, and queue-integrated progress. A second provider
   remains deferred until a suitable independent source exists.
 
@@ -73,13 +75,16 @@ Scope for the first release:
 Positive:
 - One pipeline and one canonical model serve every content type.
 - Provenance makes dedupe, updates, conflict resolution, and cherry-pick
-  tractable, including for hand-dropped jars.
+  tractable for launcher-managed content.
 - Reusing the install queue keeps progress and download state unified.
 - Backend-authored resolution keeps policy out of the UI, matching conventions.
 
 Tradeoffs:
-- Instances now carry a manifest that must be kept reconciled with the mods folder;
-  drift handling and retrofit add code the opaque-folder model did not need.
+- Instances now carry a strict manifest whose entries may drift from the
+  filesystem. Read paths report only live managed entries without destroying the
+  ownership record; explicit managed operations handle changes.
+- Hand-dropped files remain local and unmanaged. Axial does not infer ownership,
+  updates, compatibility, or removal authority from their hashes.
 - Single-provider reality means cross-provider canonicalization is unexercised
   until a second source exists, so that path stays best-effort.
 - Cherry-pick fails closed for files the provider cannot identify, because Axial
