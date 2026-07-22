@@ -327,6 +327,9 @@ fn emit_drag(
             Some("Skin file is too large; choose a PNG under 256 KiB.")
         }
         Some("Drop one PNG skin file.") => Some("Drop one PNG skin file."),
+        Some("Another skin file is still being checked.") => {
+            Some("Another skin file is still being checked.")
+        }
         Some("Could not read dropped skin file.") => Some("Could not read dropped skin file."),
         Some(_) => Some("Could not read dropped skin file."),
         None => None,
@@ -473,15 +476,21 @@ fn open_native_skin_file_platform(path: &Path) -> std::io::Result<File> {
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS,
         FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_SEQUENTIAL_SCAN, FILE_NAME_OPENED,
-        FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileStandardInfo,
+        FILE_FLAG_OPEN_NO_RECALL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_SEQUENTIAL_SCAN,
+        FILE_NAME_OPENED, FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileStandardInfo,
         GetFileInformationByHandleEx, GetFileType, VOLUME_NAME_GUID,
     };
 
+    if !windows_path_has_local_disk_prefix(path) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native skin path is not a local disk path",
+        ));
+    }
     let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN);
+    options.read(true).custom_flags(
+        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_OPEN_NO_RECALL | FILE_FLAG_SEQUENTIAL_SCAN,
+    );
     let file = options.open(path)?;
     let handle = file.as_raw_handle();
 
@@ -537,6 +546,18 @@ fn open_native_skin_file_platform(path: &Path) -> std::io::Result<File> {
 
     require_local_volume_path(handle, FILE_NAME_OPENED | VOLUME_NAME_GUID)?;
     Ok(file)
+}
+
+#[cfg(windows)]
+fn windows_path_has_local_disk_prefix(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+
+    path.is_absolute()
+        && matches!(
+            path.components().next(),
+            Some(Component::Prefix(prefix))
+                if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        )
 }
 
 #[cfg(windows)]
@@ -713,6 +734,26 @@ mod tests {
         assert!(NativeSkinFileAdmission::open(dir.join("NUL.png")).is_err());
 
         fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_native_skin_paths_reject_unc_and_device_namespaces() {
+        assert!(windows_path_has_local_disk_prefix(Path::new(
+            r"C:\Users\Axial\skin.png"
+        )));
+        assert!(windows_path_has_local_disk_prefix(Path::new(
+            r"\\?\C:\Users\Axial\skin.png"
+        )));
+        assert!(!windows_path_has_local_disk_prefix(Path::new(
+            r"\\server\share\skin.png"
+        )));
+        assert!(!windows_path_has_local_disk_prefix(Path::new(
+            r"\\?\UNC\server\share\skin.png"
+        )));
+        assert!(!windows_path_has_local_disk_prefix(Path::new(
+            r"\\.\pipe\skin.png"
+        )));
     }
 
     #[cfg(unix)]

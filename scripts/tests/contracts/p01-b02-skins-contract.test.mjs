@@ -67,8 +67,10 @@ test("native skin drag uses one expiring Rust-owned admission token", async () =
   );
   assert.match(
     nativeSkin,
-    /FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_SEQUENTIAL_SCAN/,
+    /FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL \| FILE_FLAG_SEQUENTIAL_SCAN/,
   );
+  assert.match(nativeSkin, /fn windows_path_has_local_disk_prefix/);
+  assert.match(nativeSkin, /Prefix::Disk\(_\) \| Prefix::VerbatimDisk\(_\)/);
   assert.match(nativeSkin, /GetFileType\(handle\)[\s\S]*FILE_TYPE_DISK/);
   assert.match(
     nativeSkin,
@@ -101,6 +103,10 @@ test("native skin drag uses one expiring Rust-owned admission token", async () =
   assert.match(beginDrop, /state\.pending\s*=\s*None/);
   assert.doesNotMatch(cancelDrag, /pending\s*=/);
   assert.doesNotMatch(cancelDrag, /advance_generation/);
+  assert.match(
+    nativeSkin,
+    /Some\("Another skin file is still being checked\."\)[\s\S]*Some\("Another skin file is still being checked\."\)/,
+  );
   assert.match(nativeSkin, /if pending\.token != token/);
   assert.match(nativeSkin, /state\.pending\.take\(\)/);
   assert.match(nativeSkin, /tokio::time::sleep\(SKIN_DROP_TOKEN_TTL\)/);
