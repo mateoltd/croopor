@@ -182,13 +182,6 @@ mod native {
         inode: u64,
     }
 
-    pub(crate) enum FinishTransientPublicationError {
-        Retained {
-            error: io::Error,
-            file: TransientFile,
-        },
-    }
-
     pub(crate) enum CreateTransientFileError {
         NoEffect(io::Error),
     }
@@ -1503,31 +1496,15 @@ mod native {
     }
 
     #[cfg(target_os = "linux")]
-    pub(crate) fn finish_transient_publication(
-        transient: TransientFile,
-        parent: &DirectoryHandle,
-        destination_name: &OsStr,
-        expected: Identity,
-    ) -> Result<File, FinishTransientPublicationError> {
-        let validation = retained_file_identity(&transient.file).and_then(|(identity, links)| {
-            if identity == expected
-                && links == 1
-                && file_binding_state(parent, destination_name, expected)? == BindingState::Exact
-            {
-                Ok(())
-            } else {
-                Err(binding_changed(
-                    "published transient file changed before finalization",
-                ))
-            }
-        });
-        match validation {
-            Ok(()) => Ok(transient.file),
-            Err(error) => Err(FinishTransientPublicationError::Retained {
-                error,
-                file: transient,
-            }),
-        }
+    pub(crate) fn transient_file_evidence(
+        transient: &TransientFile,
+    ) -> io::Result<(Identity, u64)> {
+        retained_file_identity(&transient.file)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn into_published_file(transient: TransientFile) -> File {
+        transient.file
     }
 
     #[cfg(target_os = "linux")]
@@ -1616,12 +1593,14 @@ mod native {
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub(crate) fn finish_transient_publication(
-        transient: TransientFile,
-        _destination_parent: &DirectoryHandle,
-        _destination_name: &OsStr,
-        _expected: Identity,
-    ) -> Result<File, FinishTransientPublicationError> {
+    pub(crate) fn transient_file_evidence(
+        _transient: &TransientFile,
+    ) -> io::Result<(Identity, u64)> {
+        Err(unsupported_transient())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn into_published_file(transient: TransientFile) -> File {
         match transient {}
     }
 
@@ -1779,6 +1758,7 @@ mod native {
         }
     }
 
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn exact_file_link_count(
         parent: &DirectoryHandle,
         name: &OsStr,
@@ -2570,13 +2550,6 @@ mod native {
         id: [u8; 16],
     }
 
-    pub(crate) enum FinishTransientPublicationError {
-        Retained {
-            error: io::Error,
-            file: TransientFile,
-        },
-    }
-
     pub(crate) enum TransientFile {}
 
     pub(crate) enum CreateTransientFileError {
@@ -3312,12 +3285,13 @@ mod native {
         Err(unsupported_transient())
     }
 
-    pub(crate) fn finish_transient_publication(
-        transient: TransientFile,
-        _parent: &DirectoryHandle,
-        _destination_name: &OsStr,
-        _expected: Identity,
-    ) -> Result<File, FinishTransientPublicationError> {
+    pub(crate) fn transient_file_evidence(
+        _transient: &TransientFile,
+    ) -> io::Result<(Identity, u64)> {
+        Err(unsupported_transient())
+    }
+
+    pub(crate) fn into_published_file(transient: TransientFile) -> File {
         match transient {}
     }
 
@@ -4404,24 +4378,6 @@ mod native {
             Some((EntryKind::File, identity)) if identity == expected => Ok(BindingState::Exact),
             Some(_) => Ok(BindingState::Occupied),
         }
-    }
-
-    pub(crate) fn exact_file_link_count(
-        parent: &DirectoryHandle,
-        name: &OsStr,
-        expected: Identity,
-    ) -> io::Result<Option<u64>> {
-        let file = match open_file(parent, name) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let (identity, links) = retained_file_identity(&file)?;
-        if identity != expected || file_binding_state(parent, name, expected)? != BindingState::Exact
-        {
-            return Ok(None);
-        }
-        Ok(Some(u64::from(links)))
     }
 
     pub(crate) fn directory_binding_state(
