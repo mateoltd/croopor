@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::fs::{File, Metadata};
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -39,6 +39,14 @@ struct NativeSkinFileRevision {
     modified_seconds: i64,
     #[cfg(unix)]
     modified_nanoseconds: i64,
+    #[cfg(windows)]
+    volume_serial_number: Option<u32>,
+    #[cfg(windows)]
+    file_index: Option<u64>,
+    #[cfg(windows)]
+    last_write_time: u64,
+    #[cfg(windows)]
+    file_size: u64,
 }
 
 #[derive(Clone)]
@@ -103,7 +111,6 @@ impl NativeSkinDropCoordinator {
         let mut state = self.shared.lock().expect(SKIN_DROP_LOCK_INVARIANT);
         advance_generation(&mut state);
         state.drag_eligible = eligible;
-        state.pending = None;
     }
 
     fn drag_eligible(&self) -> bool {
@@ -125,7 +132,6 @@ impl NativeSkinDropCoordinator {
         let mut state = self.shared.lock().expect(SKIN_DROP_LOCK_INVARIANT);
         advance_generation(&mut state);
         state.drag_eligible = false;
-        state.pending = None;
     }
 
     fn publish(
@@ -317,7 +323,8 @@ impl NativeSkinFileAdmission {
         if !has_png_extension(&path) {
             return Err("Choose a PNG skin file.".to_string());
         }
-        let file = File::open(&path).map_err(|_| "Could not read skin file.".to_string())?;
+        let file = open_native_skin_file(&path)
+            .map_err(|_| "Could not read skin file.".to_string())?;
         let metadata = file
             .metadata()
             .map_err(|_| "Could not read skin file.".to_string())?;
@@ -377,6 +384,8 @@ impl NativeSkinFileRevision {
     fn capture(metadata: &Metadata) -> Self {
         #[cfg(unix)]
         use std::os::unix::fs::MetadataExt as _;
+        #[cfg(windows)]
+        use std::os::windows::fs::MetadataExt as _;
 
         Self {
             len: metadata.len(),
@@ -389,8 +398,28 @@ impl NativeSkinFileRevision {
             modified_seconds: metadata.mtime(),
             #[cfg(unix)]
             modified_nanoseconds: metadata.mtime_nsec(),
+            #[cfg(windows)]
+            volume_serial_number: metadata.volume_serial_number(),
+            #[cfg(windows)]
+            file_index: metadata.file_index(),
+            #[cfg(windows)]
+            last_write_time: metadata.last_write_time(),
+            #[cfg(windows)]
+            file_size: metadata.file_size(),
         }
     }
+}
+
+fn open_native_skin_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    options.open(path)
 }
 
 fn has_png_extension(path: &Path) -> bool {
@@ -465,6 +494,82 @@ mod tests {
             Err("Dropped skin file is no longer available.".to_string())
         );
         fs::remove_file(path).expect("cleanup file");
+        fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[test]
+    fn enter_and_leave_do_not_cancel_an_issued_skin_drop_token() {
+        let dir = test_dir("token-drag-lifecycle");
+        let path = dir.join("player.png");
+        fs::write(&path, PNG_SIGNATURE).expect("write png");
+        let coordinator = NativeSkinDropCoordinator::new();
+        let generation = coordinator.begin_drop();
+        let token = coordinator
+            .publish(
+                generation,
+                NativeSkinFileAdmission::open(path.clone()).expect("admit skin"),
+            )
+            .expect("publish token");
+
+        coordinator.begin_drag(false);
+        coordinator.cancel_drag();
+
+        assert_eq!(
+            coordinator.consume(&token).expect("consume token").bytes,
+            PNG_SIGNATURE
+        );
+        fs::remove_file(path).expect("cleanup file");
+        fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[test]
+    fn newer_failed_drop_revokes_the_previous_skin_drop_token() {
+        let dir = test_dir("token-new-drop");
+        let path = dir.join("player.png");
+        fs::write(&path, PNG_SIGNATURE).expect("write png");
+        let coordinator = NativeSkinDropCoordinator::new();
+        let generation = coordinator.begin_drop();
+        let token = coordinator
+            .publish(
+                generation,
+                NativeSkinFileAdmission::open(path.clone()).expect("admit skin"),
+            )
+            .expect("publish token");
+
+        coordinator.begin_drop();
+        assert!(NativeSkinFileAdmission::open(dir.join("missing.png")).is_err());
+
+        assert_eq!(
+            coordinator.consume(&token),
+            Err("Dropped skin file is no longer available.".to_string())
+        );
+        fs::remove_file(path).expect("cleanup file");
+        fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_skin_admission_rejects_symlinks_and_fifos() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt as _;
+        use std::os::unix::fs::symlink;
+
+        let dir = test_dir("special-files");
+        let target = dir.join("target.png");
+        let symlink_path = dir.join("symlink.png");
+        let fifo_path = dir.join("fifo.png");
+        fs::write(&target, PNG_SIGNATURE).expect("write target");
+        symlink(&target, &symlink_path).expect("create symlink");
+        let fifo_native = CString::new(fifo_path.as_os_str().as_bytes()).expect("fifo path");
+        let result = unsafe { libc::mkfifo(fifo_native.as_ptr(), 0o600) };
+        assert_eq!(result, 0, "create fifo: {}", std::io::Error::last_os_error());
+
+        assert!(NativeSkinFileAdmission::open(symlink_path.clone()).is_err());
+        assert!(NativeSkinFileAdmission::open(fifo_path.clone()).is_err());
+
+        fs::remove_file(symlink_path).expect("cleanup symlink");
+        fs::remove_file(fifo_path).expect("cleanup fifo");
+        fs::remove_file(target).expect("cleanup target");
         fs::remove_dir(dir).expect("cleanup dir");
     }
 

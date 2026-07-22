@@ -17,7 +17,10 @@ test("native skin ingress never accepts a JavaScript-supplied path", async () =>
 
   assert.doesNotMatch(commands, /fn\s+read_skin_file\s*\(|path:\s*String/);
   assert.doesNotMatch(main, /commands::read_skin_file/);
-  assert.doesNotMatch(native, /readNativeSkinFile|tauri\.dialog|dialog\?:|tauri:\/\/drag-/);
+  assert.doesNotMatch(
+    native,
+    /readNativeSkinFile|tauri\.dialog|dialog\?:|tauri:\/\/drag-/,
+  );
   assert.doesNotMatch(capabilities, /dialog:allow-open/);
   assert.match(commands, /fn\s+pick_skin_file\s*\(app:\s*AppHandle\)/);
   assert.match(commands, /fn\s+consume_skin_drop\s*\(\s*token:\s*String/);
@@ -31,12 +34,47 @@ test("native skin drag uses one expiring Rust-owned admission token", async () =
     read("frontend/src/views/accounts/use-saved-skin-native-drag-drop.ts"),
   ]);
 
-  assert.match(nativeSkin, /const SKIN_DROP_TOKEN_TTL: Duration = Duration::from_secs\(30\);/);
+  assert.match(
+    nativeSkin,
+    /const SKIN_DROP_TOKEN_TTL: Duration = Duration::from_secs\(30\);/,
+  );
   assert.match(nativeSkin, /pending: Option<PendingNativeSkinDrop>/);
-  assert.match(nativeSkin, /file: File,[\s\S]*revision: NativeSkinFileRevision/);
+  assert.match(
+    nativeSkin,
+    /file: File,[\s\S]*revision: NativeSkinFileRevision/,
+  );
   assert.match(nativeSkin, /NativeSkinFileAdmission::open\(path\)/);
-  assert.doesNotMatch(nativeSkin, /spawn_blocking[\s\S]*NativeSkinFileAdmission::open/);
+  assert.doesNotMatch(
+    nativeSkin,
+    /spawn_blocking[\s\S]*NativeSkinFileAdmission::open/,
+  );
   assert.match(nativeSkin, /token\.len\(\) != 32/);
+  assert.match(
+    nativeSkin,
+    /libc::O_CLOEXEC \| libc::O_NOFOLLOW \| libc::O_NONBLOCK/,
+  );
+  assert.match(
+    nativeSkin,
+    /volume_serial_number: metadata\.volume_serial_number\(\)/,
+  );
+  assert.match(nativeSkin, /file_index: metadata\.file_index\(\)/);
+  assert.match(nativeSkin, /last_write_time: metadata\.last_write_time\(\)/);
+  assert.match(nativeSkin, /file_size: metadata\.file_size\(\)/);
+  const beginDrag = nativeSkin.slice(
+    nativeSkin.indexOf("fn begin_drag"),
+    nativeSkin.indexOf("fn drag_eligible"),
+  );
+  const beginDrop = nativeSkin.slice(
+    nativeSkin.indexOf("fn begin_drop"),
+    nativeSkin.indexOf("fn cancel_drag"),
+  );
+  const cancelDrag = nativeSkin.slice(
+    nativeSkin.indexOf("fn cancel_drag"),
+    nativeSkin.indexOf("fn publish"),
+  );
+  assert.doesNotMatch(beginDrag, /pending\s*=/);
+  assert.match(beginDrop, /state\.pending\s*=\s*None/);
+  assert.doesNotMatch(cancelDrag, /pending\s*=/);
   assert.match(nativeSkin, /if pending\.token != token/);
   assert.match(nativeSkin, /state\.pending\.take\(\)/);
   assert.match(nativeSkin, /tokio::time::sleep\(SKIN_DROP_TOKEN_TTL\)/);
