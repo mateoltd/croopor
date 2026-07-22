@@ -27,10 +27,11 @@ Tests inject a validated absolute root. Portable execution sets the mode to
 `portable` and supplies `AXIAL_APP_ROOT`; portable injection is independent of the
 desktop identity, while an unpaired root is invalid.
 
-`core/config::AppPaths` keeps the root private and derives immutable purpose paths
-for every managed store, cache, journal, report, staging area, and content root.
-Consumers receive only the exact leaf or directory they own; performance rules
-receive `performance/`, while `AppRootSession` retains the startup-captured physical
+`core/config::AppPaths` keeps the root private and derives immutable static purpose
+paths for stores, journals, reports, staging areas, and content roots. Live managed
+filesystem owners receive purpose-scoped Directory capabilities minted by
+`AppRootSession`; music has no ambient path accessor. Performance rules receive
+`performance/`, while `AppRootSession` retains the startup-captured physical
 root, process-image proof, and process lease. Terminal reset preflights that proof,
 proves any configured existing library physically outside the root from retained
 native ancestry identities, drains the sole filesystem authority after application
