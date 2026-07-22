@@ -67,6 +67,10 @@ test("native skin drag uses one expiring Rust-owned admission token", async () =
   );
   assert.match(
     nativeSkin,
+    /if !path\.is_absolute\(\)[\s\S]*open_native_skin_file_platform\(path\)/,
+  );
+  assert.match(
+    nativeSkin,
     /FILE_FLAG_OPEN_REPARSE_POINT \| FILE_FLAG_OPEN_NO_RECALL \| FILE_FLAG_SEQUENTIAL_SCAN/,
   );
   assert.match(nativeSkin, /fn windows_path_has_local_disk_prefix/);

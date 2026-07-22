@@ -455,6 +455,12 @@ impl NativeSkinFileRevision {
 }
 
 fn open_native_skin_file(path: &Path) -> std::io::Result<File> {
+    if !path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "native skin path is not absolute",
+        ));
+    }
     open_native_skin_file_platform(path)
 }
 
@@ -724,6 +730,16 @@ mod tests {
         );
         fs::remove_file(path).expect("cleanup file");
         fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[test]
+    fn native_skin_admission_rejects_relative_paths_before_open() {
+        assert_eq!(
+            open_native_skin_file(Path::new("relative.png"))
+                .expect_err("relative path should fail")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
     }
 
     #[cfg(windows)]
