@@ -1425,6 +1425,15 @@ mod native {
     }
 
     #[cfg(target_os = "linux")]
+    pub(crate) fn read_transient_at(
+        transient: &TransientFile,
+        bytes: &mut [u8],
+        offset: u64,
+    ) -> io::Result<usize> {
+        transient.file.read_at(bytes, offset)
+    }
+
+    #[cfg(target_os = "linux")]
     pub(crate) fn write_transient_at(
         transient: &TransientFile,
         bytes: &[u8],
@@ -1558,6 +1567,15 @@ mod native {
         _parent: &DirectoryHandle,
     ) -> Result<(TransientFile, Identity), CreateTransientFileError> {
         Err(CreateTransientFileError::NoEffect(unsupported_transient()))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(crate) fn read_transient_at(
+        _transient: &TransientFile,
+        _bytes: &mut [u8],
+        _offset: u64,
+    ) -> io::Result<usize> {
+        Err(unsupported_transient())
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -3256,6 +3274,14 @@ mod native {
     pub(crate) fn write_transient_at(
         _transient: &TransientFile,
         _bytes: &[u8],
+        _offset: u64,
+    ) -> io::Result<usize> {
+        Err(unsupported_transient())
+    }
+
+    pub(crate) fn read_transient_at(
+        _transient: &TransientFile,
+        _bytes: &mut [u8],
         _offset: u64,
     ) -> io::Result<usize> {
         Err(unsupported_transient())
