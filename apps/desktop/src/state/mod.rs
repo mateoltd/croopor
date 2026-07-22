@@ -1,3 +1,4 @@
+use crate::native_skin::NativeSkinDropCoordinator;
 use axial_api::app::{ApiServerShutdownError, ServerHandle};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -16,6 +17,7 @@ pub struct DesktopState {
     install_events: EventTaskCoordinator,
     loader_install_events: EventTaskCoordinator,
     launch_events: EventTaskCoordinator,
+    native_skin_drop: NativeSkinDropCoordinator,
 }
 
 impl DesktopState {
@@ -26,6 +28,7 @@ impl DesktopState {
             install_events: EventTaskCoordinator::new(),
             loader_install_events: EventTaskCoordinator::new(),
             launch_events: EventTaskCoordinator::new(),
+            native_skin_drop: NativeSkinDropCoordinator::new(),
         }
     }
 
@@ -47,6 +50,10 @@ impl DesktopState {
 
     pub fn launch_events(&self) -> &EventTaskCoordinator {
         &self.launch_events
+    }
+
+    pub(crate) fn native_skin_drop(&self) -> &NativeSkinDropCoordinator {
+        &self.native_skin_drop
     }
 }
 
