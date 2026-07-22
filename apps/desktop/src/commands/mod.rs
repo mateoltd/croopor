@@ -164,23 +164,20 @@ pub async fn pick_skin_file(app: AppHandle) -> Result<Option<NativeSkinFile>, St
         .file()
         .add_filter("PNG skin", &["png"])
         .pick_file(move |selected| {
-            let admission = selected
-                .map(|selected| {
-                    selected
-                        .into_path()
-                        .map_err(|_| "Native skin picker returned an invalid file.".to_string())
-                        .and_then(NativeSkinFileAdmission::open)
-                })
-                .transpose();
-            let _ = selected_tx.send(admission);
+            let _ = selected_tx.send(selected);
         });
     let selected = selected_rx
         .await
         .map_err(|_| "Native skin picker stopped before returning a selection.".to_string())?;
-    let Some(admission) = selected? else {
+    let Some(selected) = selected else {
         return Ok(None);
     };
-    tauri::async_runtime::spawn_blocking(move || admission.read())
+    let path = selected
+        .into_path()
+        .map_err(|_| "Native skin picker returned an invalid file.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        NativeSkinFileAdmission::open(path).and_then(NativeSkinFileAdmission::read)
+    })
         .await
         .map_err(|_| "Could not read skin file.".to_string())?
         .map(Some)

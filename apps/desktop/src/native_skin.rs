@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::dpi::PhysicalPosition;
 use tauri::{DragDropEvent, Emitter, WebviewWindow};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
 const SKIN_FILE_MAX_BYTES: u64 = 256 * 1024;
@@ -52,6 +53,7 @@ struct NativeSkinFileRevision {
 #[derive(Clone)]
 pub(crate) struct NativeSkinDropCoordinator {
     shared: Arc<Mutex<NativeSkinDropState>>,
+    admission_gate: Arc<Semaphore>,
 }
 
 struct NativeSkinDropState {
@@ -104,6 +106,7 @@ impl NativeSkinDropCoordinator {
                 drag_eligible: false,
                 pending: None,
             })),
+            admission_gate: Arc::new(Semaphore::new(1)),
         }
     }
 
@@ -130,8 +133,21 @@ impl NativeSkinDropCoordinator {
 
     fn cancel_drag(&self) {
         let mut state = self.shared.lock().expect(SKIN_DROP_LOCK_INVARIANT);
-        advance_generation(&mut state);
         state.drag_eligible = false;
+    }
+
+    fn try_begin_admission(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.admission_gate)
+            .try_acquire_owned()
+            .ok()
+    }
+
+    fn generation_is_current(&self, generation: u64) -> bool {
+        self.shared
+            .lock()
+            .expect(SKIN_DROP_LOCK_INVARIANT)
+            .generation
+            == generation
     }
 
     fn publish(
@@ -232,26 +248,51 @@ pub(crate) fn handle_native_skin_drag(
                     Some("Drop one PNG skin file."),
                 ),
                 NativeSkinDropSelection::One(path) => {
-                    let (token, error) = match NativeSkinFileAdmission::open(path) {
-                        Ok(admission) => (coordinator.publish(generation, admission), None),
-                        Err(error) => (None, Some(error)),
+                    let Some(admission_permit) = coordinator.try_begin_admission() else {
+                        emit_drag(
+                            window,
+                            NativeSkinDragType::Drop,
+                            false,
+                            None,
+                            position,
+                            Some("Another skin file is still being checked."),
+                        );
+                        return;
                     };
-                    if let Some(token) = token.as_ref() {
-                        let expiry_coordinator = coordinator.clone();
-                        let expiry_token = token.clone();
-                        tauri::async_runtime::spawn(async move {
-                            tokio::time::sleep(SKIN_DROP_TOKEN_TTL).await;
-                            expiry_coordinator.expire(&expiry_token);
-                        });
-                    }
-                    emit_drag(
-                        window,
-                        NativeSkinDragType::Drop,
-                        token.is_some(),
-                        token,
-                        position,
-                        error.as_deref(),
-                    );
+                    let window = window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let admission = tauri::async_runtime::spawn_blocking(move || {
+                            let result = NativeSkinFileAdmission::open(path);
+                            drop(admission_permit);
+                            result
+                        })
+                        .await
+                        .map_err(|_| "Could not read dropped skin file.".to_string())
+                        .and_then(|result| result);
+                        if !coordinator.generation_is_current(generation) {
+                            return;
+                        }
+                        let (token, error) = match admission {
+                            Ok(admission) => (coordinator.publish(generation, admission), None),
+                            Err(error) => (None, Some(error)),
+                        };
+                        if let Some(token) = token.as_ref() {
+                            let expiry_coordinator = coordinator.clone();
+                            let expiry_token = token.clone();
+                            tauri::async_runtime::spawn(async move {
+                                tokio::time::sleep(SKIN_DROP_TOKEN_TTL).await;
+                                expiry_coordinator.expire(&expiry_token);
+                            });
+                        }
+                        emit_drag(
+                            &window,
+                            NativeSkinDragType::Drop,
+                            token.is_some(),
+                            token,
+                            position,
+                            error.as_deref(),
+                        );
+                    });
                 }
             }
         }
@@ -411,15 +452,132 @@ impl NativeSkinFileRevision {
 }
 
 fn open_native_skin_file(path: &Path) -> std::io::Result<File> {
+    open_native_skin_file_platform(path)
+}
+
+#[cfg(unix)]
+fn open_native_skin_file_platform(path: &Path) -> std::io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-
-        options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
+    options.custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK);
     options.open(path)
+}
+
+#[cfg(windows)]
+fn open_native_skin_file_platform(path: &Path) -> std::io::Result<File> {
+    use std::mem::{MaybeUninit, size_of};
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS,
+        FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAG_SEQUENTIAL_SCAN, FILE_NAME_OPENED,
+        FILE_STANDARD_INFO, FILE_TYPE_DISK, FileBasicInfo, FileStandardInfo,
+        GetFileInformationByHandleEx, GetFileType, VOLUME_NAME_GUID,
+    };
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN);
+    let file = options.open(path)?;
+    let handle = file.as_raw_handle();
+
+    if unsafe { GetFileType(handle) } != FILE_TYPE_DISK {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native skin is not a disk file",
+        ));
+    }
+
+    let mut basic = MaybeUninit::<FILE_BASIC_INFO>::uninit();
+    let basic_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileBasicInfo,
+            basic.as_mut_ptr().cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if basic_ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let basic = unsafe { basic.assume_init() };
+
+    let mut standard = MaybeUninit::<FILE_STANDARD_INFO>::uninit();
+    let standard_ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileStandardInfo,
+            standard.as_mut_ptr().cast(),
+            size_of::<FILE_STANDARD_INFO>() as u32,
+        )
+    };
+    if standard_ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let standard = unsafe { standard.assume_init() };
+
+    if basic.FileAttributes
+        & (FILE_ATTRIBUTE_REPARSE_POINT
+            | FILE_ATTRIBUTE_DIRECTORY
+            | FILE_ATTRIBUTE_OFFLINE
+            | FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        != 0
+        || standard.Directory != 0
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native skin is not an exact regular file",
+        ));
+    }
+
+    require_local_volume_path(handle, FILE_NAME_OPENED | VOLUME_NAME_GUID)?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn require_local_volume_path(
+    handle: std::os::windows::io::RawHandle,
+    flags: u32,
+) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
+
+    let required = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, flags) };
+    if required == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut path = vec![0_u16; required as usize];
+    let written = unsafe {
+        GetFinalPathNameByHandleW(handle, path.as_mut_ptr(), path.len() as u32, flags)
+    };
+    if written == 0 || written as usize >= path.len() {
+        return Err(if written == 0 {
+            std::io::Error::last_os_error()
+        } else {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "native skin volume path changed while queried",
+            )
+        });
+    }
+    let path = String::from_utf16(&path[..written as usize]).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native skin volume path is malformed",
+        )
+    })?;
+    if !path.starts_with(r"\\?\Volume{") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "native skin is not on a local volume",
+        ));
+    }
+
+    Ok(())
 }
 
 fn has_png_extension(path: &Path) -> bool {
@@ -544,6 +702,16 @@ mod tests {
             Err("Dropped skin file is no longer available.".to_string())
         );
         fs::remove_file(path).expect("cleanup file");
+        fs::remove_dir(dir).expect("cleanup dir");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_skin_admission_rejects_windows_character_devices() {
+        let dir = test_dir("windows-device");
+
+        assert!(NativeSkinFileAdmission::open(dir.join("NUL.png")).is_err());
+
         fs::remove_dir(dir).expect("cleanup dir");
     }
 
