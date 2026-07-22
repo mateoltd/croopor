@@ -49,5 +49,8 @@ Tradeoffs:
   user content or mutate it while the launcher is operating
 - restart cleanup rehashes retained internal files before reconstructing typed
   deletion authority
-- direct external mutation of the reserved namespace can make recovery fail closed
-  until the instance data is reset; unverifiable entries are never silently deleted
+- observable direct external mutation of the reserved namespace makes recovery fail
+  closed until the instance data is reset
+- on Linux, an actively malicious same-UID writer can race the unavoidable
+  name-based unlink after identity validation; that actor is outside the preservation
+  guarantee and already has direct deletion authority over application data
