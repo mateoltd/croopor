@@ -23,7 +23,7 @@ pub use assets::repair_virtual_assets_from_index;
 pub(crate) use assets::{ASSET_OBJECT_BASE_URL, parse_asset_index};
 pub use content_transfer::{
     MAX_VERIFIED_CONTENT_STAGING_BYTES, VerifiedStagedContent, VerifiedStagedContentError,
-    download_owned_verified_content_to_staging, download_verified_content_to_staging,
+    download_owned_verified_content_to_staging,
 };
 pub use install::Downloader;
 pub(crate) use install::{
@@ -55,16 +55,14 @@ pub use model::{
 };
 pub(crate) use transfer::AuthenticatedSelectedArtifactSource;
 pub use transient_transfer::{
-    CreateOnlyTransferTarget, ExpectedTransferDigests, ManagedTransferAuthority,
-    PinnedTransferOrigin, PinnedTransferOriginError, RetryPolicy, RetryPolicyError,
+    CreateOnlyTransferTarget, ExpectedTransferDigests, RetryPolicy, RetryPolicyError,
     SourceOnlyTransferTarget, TransferByteContract, TransferCancellation,
     TransferCancellationSender, TransferCleanupObligation, TransferCleanupResolution,
     TransferClient, TransferClientBuildError, TransferClientConfig, TransferClientConfigError,
     TransferContract, TransferContractError, TransferDigestAlgorithm, TransferDigestParseError,
     TransferFailureEvent, TransferFailureKind, TransferFailureReport, TransferOutcome,
     TransferPublicationObligation, TransferPublicationOutcome, TransferReport, TransferTask,
-    TransferTargetCancelObligation, TransferTargetCancelOutcome, TransferTimeoutKind,
-    TransferOrigin, TransferOriginError, VerifiedCreateOnly, VerifiedSource,
+    TransferTimeoutKind, TransferOrigin, TransferOriginError, VerifiedCreateOnly, VerifiedSource,
     VerifiedTransferDigests, VerifiedTransferDiscardObligation, VerifiedTransferDiscardOutcome,
     start_create_only_transfer, start_source_transfer, transfer_cancellation_channel,
 };

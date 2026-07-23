@@ -10,9 +10,10 @@ use crate::model::{
 use crate::transaction::{
     FileTransaction, ManagedContentInventory, StagingGuard, contained_path,
 };
+use axial_fs::{Directory, LeafName};
 use axial_minecraft::download::{
     DownloadProgress, ExecutionDownloadFact, VerifiedContentIntegrity,
-    download_verified_content_to_staging,
+    download_owned_verified_content_to_staging,
 };
 use axial_minecraft::portable_path::{
     PortableFileName, PortablePathKey, PortableRelativePath, managed_content_name_is_reserved,
@@ -97,6 +98,7 @@ impl PlannedArtifact {
 pub async fn install_and_record<F, G>(
     client: &reqwest::Client,
     game_dir: &Path,
+    game_directory: &Directory,
     files: &[PlannedFile],
     mut on_progress: F,
     mut on_download_fact: G,
@@ -145,12 +147,15 @@ where
         entry.set_enabled(destination.enabled);
     }
     let staging = StagingGuard::create(game_dir, "axial-content-stage")?;
+    let staging_directory = open_staging_directory(game_dir, game_directory, staging.path())?;
 
     for (index, (planned, planned_destination)) in files.iter().zip(&destinations).enumerate() {
         let destination = contained_path(staging.path(), planned_destination.relative.as_str())?;
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
         }
+        let (destination_directory, destination_name) =
+            open_staging_destination(&staging_directory, &planned_destination.relative)?;
 
         on_progress(progress(
             "download",
@@ -164,15 +169,19 @@ where
             sha1: planned.file.sha1.clone(),
             sha512: Some(planned.file.sha512.clone()),
         };
-        match download_verified_content_to_staging(
+        match download_owned_verified_content_to_staging(
             client,
             &planned.file.download_url,
-            &destination,
+            &destination_directory,
+            destination_name,
             &expected,
         )
             .await
         {
-            Ok(report) => {
+            Ok(staged) => {
+                let report = staged
+                    .publish_create_new(&destination_directory, destination_name)
+                    .map_err(|error| ContentError::Io(std::io::Error::other(error)))?;
                 entries[index].record_authenticated_file(
                     report.bytes_written,
                     planned.file.sha512.clone(),
@@ -219,6 +228,44 @@ where
     transaction.commit_after_verified_publication();
     on_progress(done(total));
     Ok(manifest)
+}
+
+fn open_staging_directory(
+    game_dir: &Path,
+    game_directory: &Directory,
+    staging_path: &Path,
+) -> ContentResult<Directory> {
+    if staging_path.parent() != Some(game_dir) {
+        return Err(ContentError::Invalid(
+            "content staging directory escaped the instance".to_string(),
+        ));
+    }
+    let name = staging_path
+        .file_name()
+        .ok_or_else(|| ContentError::Invalid("content staging directory is invalid".to_string()))?;
+    let name = LeafName::new(name.to_os_string())
+        .map_err(|_| ContentError::Invalid("content staging directory is invalid".to_string()))?;
+    game_directory.open_directory(&name).map_err(ContentError::Io)
+}
+
+fn open_staging_destination<'a>(
+    staging_directory: &Directory,
+    relative: &'a PortableRelativePath,
+) -> ContentResult<(Directory, &'a str)> {
+    let mut directory = staging_directory.clone();
+    let mut segments = relative.as_str().split('/').peekable();
+    while let Some(segment) = segments.next() {
+        if segments.peek().is_none() {
+            return Ok((directory, segment));
+        }
+        let name = LeafName::new(segment).map_err(|_| {
+            ContentError::Invalid("content staging path is invalid".to_string())
+        })?;
+        directory = directory.open_directory(&name)?;
+    }
+    Err(ContentError::Invalid(
+        "content staging path has no filename".to_string(),
+    ))
 }
 
 /// Revalidate a resolved plan immediately before any staging or filesystem

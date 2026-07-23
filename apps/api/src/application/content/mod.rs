@@ -437,6 +437,12 @@ where
         .to_install()
         .map_err(content_execution_error)?;
     if !planned.is_empty() {
+        let game_directory = state
+            .root_session()
+            .admit_absolute_directory(&game_dir)
+            .map_err(|error| {
+                content_execution_error(axial_content::ContentError::Io(error))
+            })?;
         let _mutation = state.admit_managed_artifact_mutation().map_err(|error| {
             content_execution_error(axial_content::ContentError::Io(std::io::Error::other(
                 error.to_string(),
@@ -445,6 +451,7 @@ where
         install_and_record(
             state.content().client(),
             &game_dir,
+            &game_directory,
             &planned,
             &mut on_progress,
             &mut on_download_fact,
